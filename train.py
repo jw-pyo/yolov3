@@ -13,11 +13,12 @@ def train(
         img_size=416,
         resume=False,
         epochs=100,
-        batch_size=16,
+        batch_size=20,
         accumulated_batches=1,
         multi_scale=False,
         freeze_backbone=False,
         var=0,
+        result="result.txt"
 ):
     weights = 'weights' + os.sep
     latest = weights + 'latest.pt'
@@ -171,21 +172,22 @@ def train(
             mAP, R, P = test.test(cfg, data_cfg, weights=latest, batch_size=batch_size, img_size=img_size)
 
         # Write epoch results
-        with open('results.txt', 'a') as file:
+        with open(result, 'a') as file:
             file.write(s + '%11.3g' * 3 % (mAP, P, R) + '\n')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=10, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/coco.data', help='coco.data file path')
+    parser.add_argument('--cfg', type=str, default='cfg/bdd100k.cfg', help='cfg file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', action='store_true', help='resume training flag')
     parser.add_argument('--var', type=float, default=0, help='test variable')
+    parser.add_argument('--result', type=str, default="results.txt", help="result txt file")
     opt = parser.parse_args()
     print(opt, end='\n\n')
 
@@ -201,4 +203,5 @@ if __name__ == '__main__':
         accumulated_batches=opt.accumulated_batches,
         multi_scale=opt.multi_scale,
         var=opt.var,
+        result=opt.result
     )
