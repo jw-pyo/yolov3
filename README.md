@@ -26,15 +26,23 @@ Python 3.7 or later with the following `pip3 install -U -r requirements.txt` pac
 - `torch >= 1.0.0`
 - `opencv-python`
 
+# Tutorials
+
+* [Transfer Learning](https://github.com/ultralytics/yolov3/wiki/Example:-Transfer-Learning)
+* [Train Single Image](https://github.com/ultralytics/yolov3/wiki/Example:-Train-Single-Image)
+* [Train Single Class](https://github.com/ultralytics/yolov3/wiki/Example:-Train-Single-Class)
+* [Train Custom Data](https://github.com/ultralytics/yolov3/wiki/Train-Custom-Data)
+
 # Training
 
 **Start Training:** Run `train.py` to begin training after downloading COCO data with `data/get_coco_dataset.sh`. Training runs about 1 hour per COCO epoch on a 1080 Ti.
 
 **Resume Training:** Run `train.py --resume` to resume training from the most recently saved checkpoint `weights/latest.pt`.
 
-Each epoch trains on 120,000 images from the train and validate COCO sets, and tests on 5000 images from the COCO validate set. Default training settings produce loss plots below, with **training speed of 0.6 s/batch on a 1080 Ti (15 epochs/day)** or 0.45 s/batch on a 2080 Ti.
+Each epoch trains on 120,000 images from the train and validate COCO sets, and tests on 5000 images from the COCO validate set. Default training settings produce loss plots below, with **training speed of 0.6 s/batch on a 1080 Ti (18 epochs/day)** or 0.45 s/batch on a 2080 Ti.
 
-![Alt](https://user-images.githubusercontent.com/26833433/49822374-3b27bf00-fd7d-11e8-9180-f0ac9fe2fdb4.png "coco training loss")
+`from utils import utils; utils.plot_results()`
+![Alt](https://user-images.githubusercontent.com/26833433/53494085-3251aa00-3a9d-11e9-8af7-8c08cf40d70b.png "train.py results")
 
 ## Image Augmentation
 

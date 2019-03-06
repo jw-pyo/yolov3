@@ -153,7 +153,7 @@ class YOLOLayer(nn.Module):
             txy, twh, mask, tcls = build_targets(targets, self.anchor_vec, self.nA, self.nC, nG)
 
             tcls = tcls[mask]
-            if xy.is_cuda:
+            if p.is_cuda:
                 txy, twh, mask, tcls = txy.cuda(), twh.cuda(), mask.cuda(), tcls.cuda()
 
             # Compute losses
@@ -263,6 +263,11 @@ class Darknet(nn.Module):
             return output[5:85].t(), output[:4].t()  # ONNX scores, boxes
 
         return sum(output) if is_training else torch.cat(output, 1)
+
+
+def get_yolo_layers(model):
+    a = [module_def['type'] == 'yolo' for module_def in model.module_defs]
+    return [i for i, x in enumerate(a) if x]  # [82, 94, 106] for yolov3
 
 
 def create_grids(self, img_size, nG):

@@ -1,6 +1,8 @@
+import glob
 import random
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -53,11 +55,14 @@ def coco_class_weights():  # frequency of each class in coco train2014
     return weights
 
 
-def coco80_to_coco91_class():  # returns the coco class for each darknet class
+def coco80_to_coco91_class():  # converts 80-index (val2014) to 91-index (paper)
     # https://tech.amikelive.com/node-718/what-object-categories-labels-are-in-coco-dataset/
-    a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
-    b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
-    x = [list(a[i] == b).index(True) + 1 for i in range(80)]  # darknet to coco
+    # a = np.loadtxt('data/coco.names', dtype='str', delimiter='\n')
+    # b = np.loadtxt('data/coco_paper.names', dtype='str', delimiter='\n')
+    # x = [list(a[i] == b).index(True) + 1 for i in range(80)]  # darknet to coco
+    x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27, 28, 31, 32, 33, 34,
+         35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+         64, 65, 67, 70, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 84, 85, 86, 87, 88, 89, 90]
     return x
 
 
@@ -226,22 +231,22 @@ def bbox_iou(box1, box2, x1y1x2y2=True):
     return inter_area / (b1_area + b2_area - inter_area + 1e-16)
 
 
-def build_targets(target, anchor_wh, nA, nC, nG):
+def build_targets(target, anchor_vec, nA, nC, nG):
     """
     returns nT, nCorrect, tx, ty, tw, th, tconf, tcls
     """
     nB = len(target)  # number of images in batch
-    nT = [len(x) for x in target]
+
     txy = torch.zeros(nB, nA, nG, nG, 2)  # batch size, anchors, grid size
     twh = torch.zeros(nB, nA, nG, nG, 2)
     tconf = torch.ByteTensor(nB, nA, nG, nG).fill_(0)
     tcls = torch.ByteTensor(nB, nA, nG, nG, nC).fill_(0)  # nC = number of classes
 
     for b in range(nB):
-        nTb = nT[b]  # number of targets
+        t = target[b]
+        nTb = len(t)  # number of targets
         if nTb == 0:
             continue
-        t = target[b]
 
         gxy, gwh = t[:, 1:3] * nG, t[:, 3:5] * nG
 
@@ -250,7 +255,8 @@ def build_targets(target, anchor_wh, nA, nC, nG):
 
         # iou of targets-anchors (using wh only)
         box1 = gwh
-        box2 = anchor_wh.unsqueeze(1)
+        box2 = anchor_vec.unsqueeze(1)
+
         inter_area = torch.min(box1, box2).prod(2)
         iou = inter_area / (box1.prod(1) + box2.prod(2) - inter_area + 1e-16)
 
@@ -262,14 +268,13 @@ def build_targets(target, anchor_wh, nA, nC, nG):
             iou_order = torch.argsort(-iou_best)  # best to worst
 
             # Unique anchor selection
-            u = torch.cat((gi, gj, a), 0).view((3, -1))
-            # u = torch.stack((gi, gj, a),0)
-            _, first_unique = np.unique(u[:, iou_order], axis=1, return_index=True)  # first unique indices
-            # _, first_unique = torch.unique(u[:, iou_order], dim=1, return_inverse=True)  # different than numpy?
+            u = torch.stack((gi, gj, a), 0)[:, iou_order]
+            # _, first_unique = np.unique(u, axis=1, return_index=True)  # first unique indices
+            first_unique = return_torch_unique_index(u, torch.unique(u, dim=1))  # torch alternative
 
             i = iou_order[first_unique]
             # best anchor must share significant commonality (iou) with target
-            i = i[iou_best[i] > 0.10]  # TODO: arbitrary threshold is problematic
+            i = i[iou_best[i] > 0.10]  # TODO: examine arbitrary threshold
             if len(i) == 0:
                 continue
 
@@ -286,8 +291,8 @@ def build_targets(target, anchor_wh, nA, nC, nG):
         txy[b, a, gj, gi] = gxy - gxy.floor()
 
         # Width and height
-        twh[b, a, gj, gi] = torch.log(gwh / anchor_wh[a])  # yolo method
-        # twh[b, a, gj, gi] = torch.sqrt(gwh / anchor_wh[a]) / 2 # power method
+        twh[b, a, gj, gi] = torch.log(gwh / anchor_vec[a])  # yolo method
+        # twh[b, a, gj, gi] = torch.sqrt(gwh / anchor_vec[a]) / 2 # power method
 
         # One-hot encoding of label
         tcls[b, a, gj, gi, tc] = 1
@@ -374,7 +379,7 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
         if prediction.is_cuda:
             unique_labels = unique_labels.cuda(prediction.device)
 
-        nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental)
+        nms_style = 'OR'  # 'OR' (default), 'AND', 'MERGE' (experimental)
         for c in unique_labels:
             # Get the detections with class c
             dc = detections[detections[:, -1] == c]
@@ -423,9 +428,18 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.4):
     return output
 
 
+def return_torch_unique_index(u, uv):
+    n = uv.shape[1]  # number of columns
+    first_unique = torch.zeros(n, device=u.device).long()
+    for j in range(n):
+        first_unique[j] = (uv[:, j:j + 1] == u).all(0).nonzero()[0]
+
+    return first_unique
+
+
 def strip_optimizer_from_checkpoint(filename='weights/best.pt'):
     # Strip optimizer from *.pt files for lighter files (reduced by 2/3 size)
-    import torch
+
     a = torch.load(filename, map_location='cpu')
     a['optimizer'] = []
     torch.save(a, filename.replace('.pt', '_lite.pt'))
@@ -433,7 +447,6 @@ def strip_optimizer_from_checkpoint(filename='weights/best.pt'):
 
 def coco_class_count(path='../coco/labels/train2014/'):
     # histogram of occurrences per class
-    import glob
 
     nC = 80  # number classes
     x = np.zeros(nC, dtype='int32')
@@ -446,7 +459,6 @@ def coco_class_count(path='../coco/labels/train2014/'):
 
 def coco_only_people(path='../coco/labels/val2014/'):
     # find images with only people
-    import glob
 
     files = sorted(glob.glob('%s/*.*' % path))
     for i, file in enumerate(files):
@@ -457,20 +469,17 @@ def coco_only_people(path='../coco/labels/val2014/'):
 
 def plot_results():
     # Plot YOLO training results file 'results.txt'
-    import glob
-    import matplotlib.pyplot as plt
-    import numpy as np
-    # import os; os.system('rm -rf results.txt && wget https://storage.googleapis.com/ultralytics/results_v1_0.txt')
+    # import os; os.system('wget https://storage.googleapis.com/ultralytics/yolov3/results_v1.txt')
 
     fig = plt.figure(figsize=(14, 7))
     s = ['X + Y', 'Width + Height', 'Confidence', 'Classification', 'Total Loss', 'mAP', 'Recall', 'Precision']
     files = sorted(glob.glob('results*.txt'))
     for f in files:
         results = np.loadtxt(f, usecols=[2, 3, 4, 5, 6, 9, 10, 11]).T  # column 11 is mAP
-        n = results.shape[1]
+        x = range(1, results.shape[1])
         for i in range(8):
             plt.subplot(2, 4, i + 1)
-            plt.plot(range(1, n), results[i, 1:], marker='.', label=f)
+            plt.plot(x, results[i, x], marker='.', label=f)
             plt.title(s[i])
             if i == 0:
                 plt.legend()
