@@ -462,7 +462,7 @@ def plot_results():
     import numpy as np
     # import os; os.system('rm -rf results.txt && wget https://storage.googleapis.com/ultralytics/results_v1_0.txt')
 
-    plt.figure(figsize=(14, 7))
+    fig = plt.figure(figsize=(14, 7))
     s = ['X + Y', 'Width + Height', 'Confidence', 'Classification', 'Total Loss', 'mAP', 'Recall', 'Precision']
     files = sorted(glob.glob('results*.txt'))
     for f in files:
@@ -474,3 +474,4 @@ def plot_results():
             plt.title(s[i])
             if i == 0:
                 plt.legend()
+    fig.savefig('result.png')

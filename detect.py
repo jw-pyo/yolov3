@@ -13,6 +13,7 @@ def detect(
         cfg,
         weights,
         images,
+        class_name,
         output='output',  # output folder
         img_size=416,
         conf_thres=0.3,
@@ -48,7 +49,7 @@ def detect(
         dataloader = LoadImages(images, img_size=img_size)
 
     # Get classes and colors
-    classes = load_classes(parse_data_cfg('cfg/coco.data')['names'])
+    classes = load_classes(parse_data_cfg(class_name)['names'])
     colors = [[random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)] for _ in range(len(classes))]
 
     for i, (path, img, im0) in enumerate(dataloader):
@@ -89,7 +90,8 @@ def detect(
 
                 # Add bbox to the image
                 label = '%s %.2f' % (classes[int(cls)], conf)
-                plot_one_box([x1, y1, x2, y2], im0, label=label, color=colors[int(cls)])
+                #plot_one_box([x1, y1, x2, y2], im0, label=label, color=colors[int(cls)])
+                plot_one_box([x1, y1, x2, y2], im0, color=colors[int(cls)])
 
         dt = time.time() - t
         print('Done. (%.3fs)' % dt)
@@ -106,12 +108,13 @@ def detect(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
-    parser.add_argument('--weights', type=str, default='weights/yolov3.weights', help='path to weights file')
-    parser.add_argument('--images', type=str, default='data/samples', help='path to images')
+    parser.add_argument('--cfg', type=str, default='cfg/bdd100k.cfg', help='cfg file path')
+    parser.add_argument('--weights', type=str, default='weights/80.weights', help='path to weights file')
+    parser.add_argument('--images', type=str, default='val_videos/b2064e61-2beadd45', help='path to images')
+    parser.add_argument('--class_name', type=str, default='cfg/bdd100k.data', help='path to configure file')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
-    parser.add_argument('--conf-thres', type=float, default=0.50, help='object confidence threshold')
-    parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
+    parser.add_argument('--conf-thres', type=float, default=0.7, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
+    parser.add_argument('--nms-thres', type=float, default=0.2, help='iou threshold for non-maximum suppression. NMS remove the bbox higher than nms-thres')
     opt = parser.parse_args()
     print(opt)
 
@@ -120,6 +123,7 @@ if __name__ == '__main__':
             opt.cfg,
             opt.weights,
             opt.images,
+            opt.class_name,
             img_size=opt.img_size,
             conf_thres=opt.conf_thres,
             nms_thres=opt.nms_thres
