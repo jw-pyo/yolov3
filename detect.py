@@ -90,8 +90,8 @@ def detect(
 
                 # Add bbox to the image
                 label = '%s %.2f' % (classes[int(cls)], conf)
-                #plot_one_box([x1, y1, x2, y2], im0, label=label, color=colors[int(cls)])
-                plot_one_box([x1, y1, x2, y2], im0, color=colors[int(cls)])
+                plot_one_box([x1, y1, x2, y2], im0, label=label, color=colors[int(cls)])
+                #plot_one_box([x1, y1, x2, y2], im0, color=colors[int(cls)])
 
         dt = time.time() - t
         print('Done. (%.3fs)' % dt)
@@ -108,13 +108,13 @@ def detect(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--cfg', type=str, default='cfg/bdd100k.cfg', help='cfg file path')
-    parser.add_argument('--weights', type=str, default='weights/80.weights', help='path to weights file')
+    parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
+    parser.add_argument('--weights', type=str, default='weights/rainy/best.pt', help='path to weights file')
     parser.add_argument('--images', type=str, default='val_videos/b2064e61-2beadd45', help='path to images')
-    parser.add_argument('--class_name', type=str, default='cfg/bdd100k.data', help='path to configure file')
+    parser.add_argument('--class_name', type=str, default='cfg/bdd100k/bdd100k.data', help='path to configure file')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
-    parser.add_argument('--conf-thres', type=float, default=0.7, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
-    parser.add_argument('--nms-thres', type=float, default=0.2, help='iou threshold for non-maximum suppression. NMS remove the bbox higher than nms-thres')
+    parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
+    parser.add_argument('--nms-thres', type=float, default=0.4, help='iou threshold for non-maximum suppression. NMS remove the bbox higher than nms-thres')
     opt = parser.parse_args()
     print(opt)
 

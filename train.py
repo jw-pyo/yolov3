@@ -13,14 +13,16 @@ def train(
         img_size=416,
         resume=False,
         epochs=100,
-        batch_size=20,
+        batch_size=16,
         accumulated_batches=1,
         multi_scale=False,
         freeze_backbone=False,
         var=0,
-        result="result.txt"
+        weight_path="weights/rainy",
+        result="result.txt",
+        ckpt=10
 ):
-    weights = 'weights' + os.sep
+    weights = weight_path
     latest = weights + 'latest.pt'
     best = weights + 'best.pt'
     device = torch_utils.select_device()
@@ -75,6 +77,9 @@ def train(
         elif cfg.endswith('yolov3-tiny.cfg'):
             load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
             cutoff = 15
+        elif cfg.startswith('bdd100k'):
+            load_darknet_weights(model, "weights/yolov3.weights")
+            cutoff = 75
 
         # if torch.cuda.device_count() > 1:
         #    model = nn.DataParallel(model)
@@ -89,7 +94,7 @@ def train(
     t0 = time.time()
     model_info(model)
     n_burnin = min(round(dataloader.nB / 5), 1000)  # number of burn-in batches
-    for epoch in range(epochs):
+    for epoch in range(1, epochs):
         epoch += start_epoch
 
         print(('%8s%12s' + '%10s' * 7) % (
@@ -140,7 +145,7 @@ def train(
                 rloss[key] = (rloss[key] * ui + val) / (ui + 1)
 
             s = ('%8s%12s' + '%10.3g' * 7) % (
-                '%g/%g' % (epoch, epochs - 1),
+                '%g/%g' % (epoch, epochs + start_epoch),
                 '%g/%g' % (i, len(dataloader) - 1),
                 rloss['xy'], rloss['wh'], rloss['conf'],
                 rloss['cls'], rloss['loss'],
@@ -165,8 +170,8 @@ def train(
             os.system('cp ' + latest + ' ' + best)
 
         # Save backup weights every 5 epochs (optional)
-        # if (epoch > 0) & (epoch % 5 == 0):
-        #     os.system('cp ' + latest + ' ' + weights + 'backup{}.pt'.format(epoch)))
+        if (epoch > 0) & (epoch % ckpt == 0):
+            os.system('cp ' + latest + ' ' + weights + 'backup{}.pt'.format(epoch))
 
         # Calculate mAP
         with torch.no_grad():
@@ -180,15 +185,17 @@ def train(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=10, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=20, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
-    parser.add_argument('--cfg', type=str, default='cfg/bdd100k.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k.data', help='coco.data file path')
+    parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
-    parser.add_argument('--resume', action='store_true', help='resume training flag')
+    parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
     parser.add_argument('--var', type=float, default=0, help='test variable')
-    parser.add_argument('--result', type=str, default="results.txt", help="result txt file")
+    parser.add_argument('--weight_path', type=str, default="weights/rainy", help="weight path")
+    parser.add_argument('--result', type=str, default="result/results.txt", help="result txt file")
+    parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
     opt = parser.parse_args()
     print(opt, end='\n\n')
 
@@ -204,5 +211,7 @@ if __name__ == '__main__':
         accumulated_batches=opt.accumulated_batches,
         multi_scale=opt.multi_scale,
         var=opt.var,
-        result=opt.result
+        weight_path=opt.weight_path,
+        result=opt.result,
+        ckpt=opt.ckpt
     )

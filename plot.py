@@ -1,3 +1,4 @@
 from utils import utils
+import sys
 
-utils.plot_results()
+utils.plot_results(sys.argv[1])

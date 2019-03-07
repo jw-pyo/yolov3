@@ -467,13 +467,13 @@ def coco_only_people(path='../coco/labels/val2014/'):
             print(labels.shape[0], file)
 
 
-def plot_results():
+def plot_results(out_path="results*.txt"):
     # Plot YOLO training results file 'results.txt'
     # import os; os.system('wget https://storage.googleapis.com/ultralytics/yolov3/results_v1.txt')
 
     fig = plt.figure(figsize=(14, 7))
     s = ['X + Y', 'Width + Height', 'Confidence', 'Classification', 'Total Loss', 'mAP', 'Recall', 'Precision']
-    files = sorted(glob.glob('results*.txt'))
+    files = sorted(glob.glob(out_path))
     for f in files:
         results = np.loadtxt(f, usecols=[2, 3, 4, 5, 6, 9, 10, 11]).T  # column 11 is mAP
         x = range(1, results.shape[1])
