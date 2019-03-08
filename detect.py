@@ -110,7 +110,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/best.pt', help='path to weights file')
-    parser.add_argument('--images', type=str, default='val_videos/b2064e61-2beadd45', help='path to images')
+    parser.add_argument('--images', type=str, default='val_videos/rainy_night/b2064e61-2beadd45', help='path to images')
     parser.add_argument('--class_name', type=str, default='cfg/bdd100k/bdd100k.data', help='path to configure file')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
     parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
