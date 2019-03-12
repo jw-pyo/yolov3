@@ -234,6 +234,15 @@ class Darknet(nn.Module):
 
         for i, (module_def, module) in enumerate(zip(self.module_defs, self.module_list)):
             mtype = module_def['type']
+            print(i, module_def)
+            print(x.shape)
+            f = open("txt2.txt", "a")
+            try:
+                f.write("weight: {}\n".format(module[0].weight.shape))
+                f.close()
+            except:
+                f.write("skip print weight because it's YOLO\n")
+                f.close()
             if mtype in ['convolutional', 'upsample', 'maxpool']:
                 x = module(x)
             elif mtype == 'route':
@@ -242,17 +251,22 @@ class Darknet(nn.Module):
                     x = layer_outputs[layer_i[0]]
                 else:
                     x = torch.cat([layer_outputs[i] for i in layer_i], 1)
+                print("after router x: ", x.shape)
             elif mtype == 'shortcut':
                 layer_i = int(module_def['from'])
                 x = layer_outputs[-1] + layer_outputs[layer_i]
             elif mtype == 'yolo':
                 if is_training:  # get loss
+                    print("YOLO")
+                    print("before x: ", x.shape)
                     x, *losses = module[0](x, img_size, targets, var)
+                    print("after x: ", x.shape)
                     for name, loss in zip(self.loss_names, losses):
                         self.losses[name] += loss
                 else:  # get detections
                     x = module[0](x, img_size)
                 output.append(x)
+                print("YOLO: ", x.shape)
             layer_outputs.append(x)
 
         if is_training:

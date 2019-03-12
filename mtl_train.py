@@ -1,16 +1,17 @@
 import argparse
 import time
-
+import ast
 import test  # Import test.py to get mAP after each epoch
-from models import *
-#from multitask_models import *
+#from models import *
+from multitask_models import *
 
 from utils.datasets import *
 from utils.utils import *
 
 
 def train(
-        cfg,
+        shared_cfg,
+        diff_cfgs,
         data_cfg,
         img_size=416,
         resume=False,
@@ -19,7 +20,7 @@ def train(
         accumulated_batches=1,
         multi_scale=False,
         freeze_backbone=False,
-        var=0,
+        cond=0,
         weight_path="weights/rainy",
         result="result.txt",
         ckpt=10
@@ -38,7 +39,7 @@ def train(
     train_path = parse_data_cfg(data_cfg)['train']
 
     # Initialize model
-    model = Darknet(cfg, img_size)
+    model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
 
     # Get dataloader
     dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True)
@@ -48,10 +49,11 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     if resume:
-        checkpoint = torch.load(latest, map_location='cpu')
+        checkpoint = model.load_weights(weights)
+        #checkpoint = torch.load(latest, map_location='cpu') jwpyo
 
         # Load weights to resume from
-        model.load_state_dict(checkpoint['model'])
+        # model.load_state_dict(checkpoint['model']) jwpyo
 
         # if torch.cuda.device_count() > 1:
         #   model = nn.DataParallel(model)
@@ -72,19 +74,15 @@ def train(
         del checkpoint  # current, saved
 
     else:
-        # Initialize model with backbone (optional)
-        if cfg.endswith('yolov3.cfg'):
-            load_darknet_weights(model, weights + 'darknet53.conv.74')
-            cutoff = 75
-        elif cfg.endswith('yolov3-tiny.cfg'):
-            load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
-            cutoff = 15
-        elif cfg.startswith('bdd100k'):
+        if shared_cfg.startswith('bdd100k'):
             load_darknet_weights(model, "weights/yolov3.weights")
             cutoff = 75
-
+        else:
+            model.apply(weights_init_normal)
+            cutoff = 75
         # if torch.cuda.device_count() > 1:
         #    model = nn.DataParallel(model)
+        
         model.to(device).train()
 
         # Set optimizer
@@ -133,7 +131,7 @@ def train(
                     g['lr'] = lr
 
             # Compute loss, compute gradient, update parameters
-            loss = model(imgs.to(device), targets, var=var)
+            loss = model(imgs.to(device), targets, cond=cond)
             loss.backward()
 
             # accumulate gradient for x batches before optimizing
@@ -187,14 +185,15 @@ def train(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=20, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=10, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
-    parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
+    parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
+    parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_clear.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
-    parser.add_argument('--var', type=float, default=0, help='test variable')
+    parser.add_argument('--cond', type=float, default=0, help='test variable')
     parser.add_argument('--weight_path', type=str, default="weights/test", help="weight path")
     parser.add_argument('--result', type=str, default="result/results.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
@@ -204,7 +203,8 @@ if __name__ == '__main__':
     init_seeds()
 
     train(
-        opt.cfg,
+        opt.shared_cfg,
+        opt.diff_cfgs,
         opt.data_cfg,
         img_size=opt.img_size,
         resume=opt.resume,
@@ -212,7 +212,7 @@ if __name__ == '__main__':
         batch_size=opt.batch_size,
         accumulated_batches=opt.accumulated_batches,
         multi_scale=opt.multi_scale,
-        var=opt.var,
+        cond=opt.cond,
         weight_path=opt.weight_path,
         result=opt.result,
         ckpt=opt.ckpt
