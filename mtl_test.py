@@ -41,7 +41,7 @@ def test(
 
     # Get dataloader
     # dataloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path), batch_size=batch_size)
-    dataloader = LoadImagesAndLabels(test_path, batch_size=batch_size, img_size=img_size)
+    dataloader = LoadImagesAndLabels(test_path, batch_size=batch_size, img_size=img_size, multi_domain=True, classify_index=[396, 682])
 
     mean_mAP, mean_R, mean_P, seen = 0.0, 0.0, 0.0, 0
     print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP'))
@@ -49,9 +49,25 @@ def test(
         [], [], [], [], [], [], [], [], []
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
     coco91class = coco80_to_coco91_class()
-    for batch_i, (imgs, targets, paths, shapes) in enumerate(dataloader):
+    
+    for batch_i, (imgs, targets, paths, shapes, cond) in enumerate(dataloader):
+        """
+        bdd100k rainy valid set is 737.
+        It sequentially aligned:
+            rainy_daytime[0:396], rainy_night[396:682], rainy_dawndusk[682:737]
+        """
         t = time.time()
-        output = model(imgs.to(device))
+        """
+        if batch_i > -1 and i < 396:
+            cond = 0
+        elif i > 395 and i < 682:
+            cond = 1
+        elif i > 681 and i < 737:
+            cond = 2
+        else:
+            raise IndexError("Valid Data is out of the range")
+        """
+        output = model(imgs.to(device), None, cond)
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
         # Compute average precision for each sample
@@ -169,8 +185,8 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', cfg/multidarknet/diff2.cfg', cfg/multidarknet/diff3.cfg']", help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_clear_night.data', help='coco.data file path')
-    parser.add_argument('--weights', type=str, default='weights/clear_night/best.pt', help='path to weights file')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
+    parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
     #parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     #parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
     #parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
@@ -184,7 +200,8 @@ if __name__ == '__main__':
 
     with torch.no_grad():
         mAP = test(
-            opt.cfg,
+            opt.shared_cfg,
+            opt.diff_cfgs,
             opt.data_cfg,
             opt.weights,
             opt.batch_size,

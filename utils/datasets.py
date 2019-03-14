@@ -2,6 +2,7 @@ import glob
 import math
 import os
 import random
+import copy 
 
 import cv2
 import numpy as np
@@ -90,7 +91,7 @@ class LoadWebcam:  # for inference
 
 
 class LoadImagesAndLabels:  # for training
-    def __init__(self, path, batch_size=1, img_size=608, multi_scale=False, augment=False):
+    def __init__(self, path, batch_size=1, img_size=608, multi_scale=False, augment=False, multi_domain=False, classify_index=[]):
         with open(path, 'r') as file:
             self.img_files = file.readlines()
             self.img_files = [x.replace('\n', '') for x in self.img_files]
@@ -105,21 +106,54 @@ class LoadImagesAndLabels:  # for training
         self.height = img_size
         self.multi_scale = multi_scale
         self.augment = augment
-
+        self.multi_domain = multi_domain
+        self.classify_index = classify_index
+        self.accumulate_count = 0
+        self.temp_i = 0
+        self.cond = 0
         assert self.nF > 0, 'No images found in %s' % path
 
     def __iter__(self):
         self.count = -1
-        self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
+        if self.multi_domain and self.augment:
+            whole_index = self.classify_index + [self.nF] # just append
+            self.shuffled_vector = list()
+            ptr = 0
+            for i, k in enumerate(whole_index):
+                self.shuffled_vector.extend(np.random.permutation(np.arange(ptr,k)))
+                ptr = copy.copy(k)
+        else:
+            self.shuffled_vector = np.random.permutation(self.nF) if self.augment else np.arange(self.nF)
         return self
 
     def __next__(self):
         self.count += 1
+        self.temp_i = 0
+        self.cond = 0
         if self.count == self.nB:
             raise StopIteration
 
         ia = self.count * self.batch_size
         ib = min((self.count + 1) * self.batch_size, self.nF)
+        
+        # @jwpyo: multi_domain index
+        #TODO
+        if self.multi_domain:
+            ia = self.temp_i
+            #classify_index = [2501, 3600] # the first index of class
+            cond = self.cond
+            k = self.classify_index[cond] if cond < len(self.classify_index) else self.nF
+            if ia + self.batch_size < k:
+                ib = min(ia + self.batch_size, self.nF)
+                self.temp_i = ib
+            elif ia + self.batch_size > k-1:
+                ib = k
+                self.temp_i = ib
+                self.cond += 1
+
+            if k == self.nF:
+                print("This is the last class")
+            #print("ia, ib: {} {}".format(ia, ib))
 
         if self.multi_scale:
             # Multi-Scale YOLO Training
@@ -212,11 +246,12 @@ class LoadImagesAndLabels:  # for training
             img_shapes.append((h, w))
 
         # Normalize
+        print("img_all size: ", len(img_all), [len(i) for i in img_all])
         img_all = np.stack(img_all)[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB and cv2 to pytorch
         img_all = np.ascontiguousarray(img_all, dtype=np.float32)
         img_all /= 255.0
 
-        return torch.from_numpy(img_all), labels_all, img_paths, img_shapes
+        return torch.from_numpy(img_all), labels_all, img_paths, img_shapes, (cond if self.multi_domain else None)
 
     def __len__(self):
         return self.nB  # number of batches

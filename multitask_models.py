@@ -1,5 +1,6 @@
 from __future__ import division
 import os
+import copy
 
 import torch
 import torch.nn as nn
@@ -105,25 +106,33 @@ def create_multitask_modules(shared_module_defs, diff_module_defs_list):
         module_list_shared.append(modules)
         if filters is not None:
             output_filters.append(filters)
-    shared_output_filters = output_filters
+        #print(i, len(output_filters))
+    shared_output_filters = copy.copy(output_filters) # shallow copy
+
     
     # individual task
     for j, diff_module_defs in enumerate(diff_module_defs_list):
-        output_filters = shared_output_filters
+        del output_filters
+        output_filters = copy.copy(shared_output_filters)
         for i, module_def in enumerate(diff_module_defs):
             modules, filters = parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count)
             module_list_diff[j].append(modules)
             if filters is not None:
                 output_filters.append(filters)
+            #print(j, len(output_filters))
     
     return hyperparams, module_list_shared, module_list_diff
 
 
-def create_modules(module_defs):
+def create_modules(module_defs, diff=False):
     """
     Constructs module list of layer blocks from module configuration in module_defs
+    if not diff:
+        hyperparams = module_defs.pop(0)
+    else:
     """
     hyperparams = module_defs.pop(0)
+
     output_filters = [int(hyperparams["channels"])]
     module_list = nn.ModuleList()
     for i, module_def in enumerate(module_defs):
@@ -418,25 +427,29 @@ class MultiDarknet(nn.Module):
         module_list_diff = create_multitask_modules(shared_module_defs, \
                                                         diff_module_defs_list)
         """
-        self.diff1_module_list = SubModule(self.module_list_shared)
-        self.diff2_module_list = SubModule(self.module_list_shared)
-        self.diff3_module_list = SubModule(self.module_list_shared)
+        self.diff1_module_list = SubModule(module_list_shared)
+        self.diff2_module_list = SubModule(module_list_shared)
+        self.diff3_module_list = SubModule(module_list_shared)
         """
 
         # module_def, module_list
         list_of_layers = list(module_list_shared.children())
+        
         for i in range(len(module_list_diff)):
             list_of_layers.extend(list(module_list_diff[i].children()))
+        
         self.module_list = nn.Sequential(*list_of_layers)
         
         self.module_def = shared_module_defs
+        
         for i in range(len(diff_module_defs_list)):
             self.module_def.extend(diff_module_defs_list[i]) # per 32
         
         self.img_size = img_size
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0])
-        self.loss_names = ["x", "y", "w", "h", "conf", "cls", "recall", "precision"]
+        self.loss_names = ['loss', 'xy', 'wh', 'conf', 'cls', 'nT']
+        #print("module_list length: {}".format(len(self.module_list)))
     def forward(self, x, targets=None, cond=0):
         """
         cond: the index of branch which to choose
@@ -498,9 +511,18 @@ class MultiDarknet(nn.Module):
         
         # diff layer
         # print("length of diff_module_defs: ", len(self.diff_module_defs_list[cond]))
+        """
+        if cond == 0:
+            self.diff = self.diff1_module_list
+        elif cond == 1:
+            self.diff = self.diff2_module_list
+        else:
+            self.diff = self.diff3_module_list
+        """
         for i, (module_def, module_) in enumerate(zip( \
-                self.module_def[75 + 32*cond : 75 + 32*(cond+1)], \
-                self.module_list[75 + 32*cond : 75 + 32*(cond+1)])): 
+            self.module_def[75 + 32*cond : 75 + 32*(cond+1)], \
+            self.module_list[75 + 32*cond : 75 + 32*(cond+1)])): 
+            #self.diff[75:107])):
             """
             print("i: ", i, module_def)
             print(x.shape)
@@ -532,10 +554,12 @@ class MultiDarknet(nn.Module):
                         self.losses[name] += loss
                 # Test phase: Get detections
                 else:
-                    x = module_[0](x, img_size)
+                    x = module_[0](x, img_size, None, cond)
                 output.append(x)  
             layer_outputs.append(x)
         
+        #print("shared {}\n diff1 {}\n diff2 {}\n diff3 {}\n".format(
+        #    self.module_list[5][0].weight[5][10][1], self.module_list[89][0].weight[5][10:13].permute(2,1,0), self.module_list[121][0].weight[5][10:13].permute(2,1,0), self.module_list[153][0].weight[5][10:13].permute(2,1,0)))
         if is_training:
             self.losses['nT'] /= 3
         

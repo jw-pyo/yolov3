@@ -122,7 +122,7 @@ def train(
         ui = -1
         rloss = defaultdict(float)  # running loss
         optimizer.zero_grad()
-        for i, (imgs, targets, _, _) in enumerate(dataloader):
+        for i, (imgs, targets, _, _, var) in enumerate(dataloader):
             if sum([len(x) for x in targets]) < 1:  # if no targets continue
                 continue
 
@@ -133,7 +133,7 @@ def train(
                     g['lr'] = lr
 
             # Compute loss, compute gradient, update parameters
-            loss = model(imgs.to(device), targets, var=var)
+            loss = model(imgs.to(device), targets, var=0)
             loss.backward()
 
             # accumulate gradient for x batches before optimizing
@@ -154,7 +154,6 @@ def train(
                 model.losses['nT'], time.time() - t0)
             t0 = time.time()
             print(s)
-
         # Update best loss
         loss_per_target = rloss['loss'] / rloss['nT']
         if loss_per_target < best_loss:
@@ -190,13 +189,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=20, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_clear.data', help='coco.data file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy_dawndusk.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
     parser.add_argument('--var', type=float, default=0, help='test variable')
     parser.add_argument('--weight_path', type=str, default="weights/test", help="weight path")
-    parser.add_argument('--result', type=str, default="result/results.txt", help="result txt file")
+    parser.add_argument('--result', type=str, default="result/test.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
     opt = parser.parse_args()
     print(opt, end='\n\n')

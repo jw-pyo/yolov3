@@ -1,7 +1,7 @@
 import argparse
 import time
 import ast
-import test  # Import test.py to get mAP after each epoch
+import mtl_test as test # Import test.py to get mAP after each epoch
 #from models import *
 from multitask_models import *
 
@@ -42,7 +42,7 @@ def train(
     model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
 
     # Get dataloader
-    dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True)
+    dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True, multi_domain=True, classify_index=[2522, 4730])
 
     lr0 = 0.001
     cutoff = -1  # backbone reaches to cutoff layer
@@ -93,7 +93,7 @@ def train(
 
     t0 = time.time()
     model_info(model)
-    n_burnin = min(round(dataloader.nB / 5), 1000)  # number of burn-in batches
+    n_burnin = min(round(dataloader.nB / 5 + 1), 1000)  # number of burn-in batches
     for epoch in range(1, epochs):
         epoch += start_epoch
 
@@ -120,7 +120,24 @@ def train(
         ui = -1
         rloss = defaultdict(float)  # running loss
         optimizer.zero_grad()
-        for i, (imgs, targets, _, _) in enumerate(dataloader):
+        
+        #dataloader iteration 
+        for i, (imgs, targets, _, _, cond) in enumerate(dataloader):
+            """
+            bdd100k rainy train set is 5058.
+            It sequentially aligned:
+                rainy_daytime[0:2522], rainy_night[2522:4730], rainy_dawndusk[4730:5058]
+            if i > -1 and i < 2522:
+                cond = 0
+            elif i > 2521 and i < 4730:
+                cond = 1
+            elif i > 4729 and i < 5058:
+                cond = 2
+            else:
+                raise IndexError("Train Data is out of the range")
+            """
+             
+            
             if sum([len(x) for x in targets]) < 1:  # if no targets continue
                 continue
 
@@ -138,7 +155,6 @@ def train(
             if ((i + 1) % accumulated_batches == 0) or (i == len(dataloader) - 1):
                 optimizer.step()
                 optimizer.zero_grad()
-
             # Running epoch-means of tracked metrics
             ui += 1
             for key, val in model.losses.items():
@@ -154,9 +170,8 @@ def train(
             print(s)
 
         # Update best loss
-        loss_per_target = rloss['loss'] / rloss['nT']
-        if loss_per_target < best_loss:
-            best_loss = loss_per_target
+        if rloss['loss'] < best_loss:
+            best_loss = rloss['loss']
 
         # Save latest checkpoint
         checkpoint = {'epoch': epoch,
@@ -166,16 +181,16 @@ def train(
         torch.save(checkpoint, latest)
 
         # Save best checkpoint
-        if best_loss == loss_per_target:
+        if best_loss == rloss['loss']:
             os.system('cp ' + latest + ' ' + best)
 
-        # Save backup weights every 5 epochs (optional)
+        # Save backup weights every ckpt epochs (optional)
         if (epoch > 0) & (epoch % ckpt == 0):
             os.system('cp ' + latest + ' ' + weights + 'backup{}.pt'.format(epoch))
 
         # Calculate mAP
         with torch.no_grad():
-            mAP, R, P = test.test(cfg, data_cfg, weights=latest, batch_size=batch_size, img_size=img_size)
+            mAP, R, P = test.test(shared_cfg, diff_cfgs, data_cfg, weights=latest, batch_size=batch_size, img_size=img_size)
 
         # Write epoch results
         with open(result, 'a') as file:
@@ -185,17 +200,17 @@ def train(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=10, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=15, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_clear.data', help='coco.data file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
     parser.add_argument('--cond', type=float, default=0, help='test variable')
-    parser.add_argument('--weight_path', type=str, default="weights/test", help="weight path")
-    parser.add_argument('--result', type=str, default="result/results.txt", help="result txt file")
+    parser.add_argument('--weight_path', type=str, default="weights/rainy/multidomain", help="weight path")
+    parser.add_argument('--result', type=str, default="result/rainy/multidomain/rainy_md.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
     opt = parser.parse_args()
     print(opt, end='\n\n')
