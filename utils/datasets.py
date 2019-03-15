@@ -115,6 +115,8 @@ class LoadImagesAndLabels:  # for training
 
     def __iter__(self):
         self.count = -1
+        self.temp_i = 0
+        self.cond = 0
         if self.multi_domain and self.augment:
             whole_index = self.classify_index + [self.nF] # just append
             self.shuffled_vector = list()
@@ -128,8 +130,6 @@ class LoadImagesAndLabels:  # for training
 
     def __next__(self):
         self.count += 1
-        self.temp_i = 0
-        self.cond = 0
         if self.count == self.nB:
             raise StopIteration
 
@@ -246,7 +246,7 @@ class LoadImagesAndLabels:  # for training
             img_shapes.append((h, w))
 
         # Normalize
-        print("img_all size: ", len(img_all), [len(i) for i in img_all])
+        #print("img_all size: ", len(img_all), [len(i) for i in img_all])
         img_all = np.stack(img_all)[:, :, :, ::-1].transpose(0, 3, 1, 2)  # BGR to RGB and cv2 to pytorch
         img_all = np.ascontiguousarray(img_all, dtype=np.float32)
         img_all /= 255.0

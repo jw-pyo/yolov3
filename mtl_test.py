@@ -94,7 +94,7 @@ def test(
                 # add to json dictionary
                 for di, d in enumerate(detections):
                     jdict.append({
-                        'image_id': int(Path(paths[si]).stem.split('_')[-1]),
+                        'image_id': Path(paths[si]).stem.split('_')[-1],
                         'category_id': coco91class[int(d[6])],
                         'bbox': [float3(x) for x in box[di]],
                         'score': float3(d[4] * d[5])
@@ -159,7 +159,7 @@ def test(
 
     # Save JSON
     if save_json:
-        imgIds = [int(Path(x).stem.split('_')[-1]) for x in dataloader.img_files]
+        imgIds = [Path(x).stem.split('_')[-1] for x in dataloader.img_files]
         with open('results.json', 'w') as file:
             json.dump(jdict, file)
 
@@ -184,7 +184,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
-    parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', cfg/multidarknet/diff2.cfg', cfg/multidarknet/diff3.cfg']", help='cfg file path')
+    parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
     #parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
@@ -193,7 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.4, help='iou threshold for non-maximum suppression') 
-    parser.add_argument('--save-json', action='store_true', help='save a cocoapi-compatible JSON results file')
+    parser.add_argument('--save-json', type=bool, default=False, help='save a cocoapi-compatible JSON results file')
     parser.add_argument('--img-size', type=int, default=416, help='size of each image dimension')
     opt = parser.parse_args()
     print(opt, end='\n\n')

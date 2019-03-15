@@ -209,7 +209,7 @@ if __name__ == '__main__':
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
     parser.add_argument('--cond', type=float, default=0, help='test variable')
-    parser.add_argument('--weight_path', type=str, default="weights/rainy/multidomain", help="weight path")
+    parser.add_argument('--weight_path', type=str, default="weights/rainy/multidomain/", help="weight path")
     parser.add_argument('--result', type=str, default="result/rainy/multidomain/rainy_md.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
     opt = parser.parse_args()
