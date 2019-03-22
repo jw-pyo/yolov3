@@ -18,7 +18,7 @@ def train(
         batch_size=16,
         accumulated_batches=1,
         multi_scale=False,
-        freeze_backbone=False,
+        freeze_backbone=True,
         var=0,
         weight_path="weights/rainy",
         result="result.txt",
@@ -82,7 +82,7 @@ def train(
         elif cfg.startswith('bdd100k'):
             load_darknet_weights(model, "weights/yolov3.weights")
             cutoff = 75
-
+        cutoff = 70
         # if torch.cuda.device_count() > 1:
         #    model = nn.DataParallel(model)
         model.to(device).train()
@@ -114,7 +114,7 @@ def train(
             g['lr'] = lr
 
         # Freeze darknet53.conv.74 for first epoch
-        if freeze_backbone and (epoch < 2):
+        if freeze_backbone:
             for i, (name, p) in enumerate(model.named_parameters()):
                 if int(name.split('.')[1]) < cutoff:  # if layer < 75
                     p.requires_grad = False if (epoch == 0) else True
@@ -186,16 +186,16 @@ def train(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
-    parser.add_argument('--batch-size', type=int, default=20, help='size of each image batch')
+    parser.add_argument('--batch-size', type=int, default=15, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
     parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy_dawndusk.data', help='coco.data file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
     parser.add_argument('--multi-scale', action='store_true', help='random image sizes per batch 320 - 608')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='pixels')
     parser.add_argument('--resume', type=bool, default=False, help='resume training flag')
     parser.add_argument('--var', type=float, default=0, help='test variable')
-    parser.add_argument('--weight_path', type=str, default="weights/test", help="weight path")
-    parser.add_argument('--result', type=str, default="result/test.txt", help="result txt file")
+    parser.add_argument('--weight_path', type=str, default="weights/rainy/", help="weight path")
+    parser.add_argument('--result', type=str, default="result/rainy/rainy.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
     opt = parser.parse_args()
     print(opt, end='\n\n')

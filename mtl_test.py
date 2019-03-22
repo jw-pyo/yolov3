@@ -2,6 +2,7 @@ import argparse
 import json
 import time
 import ast
+import numpy as np
 from pathlib import Path
 
 from multitask_models import *
@@ -17,6 +18,7 @@ def test(
         batch_size=16,
         img_size=416,
         iou_thres=0.5,
+        mAP_05_095=False,
         conf_thres=0.3,
         nms_thres=0.45,
         save_json=False
@@ -30,7 +32,6 @@ def test(
 
     # Initialize model
     model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
-
     # Load weights
     if weights.endswith('.pt'):  # pytorch format
         model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
@@ -38,6 +39,8 @@ def test(
         load_darknet_weights(model, weights)
 
     model.to(device).eval()
+    
+        #p.requires_grad = True if (p.shape[0] == 222) else False
 
     # Get dataloader
     # dataloader = torch.utils.data.DataLoader(LoadImagesAndLabels(test_path), batch_size=batch_size)
@@ -50,12 +53,16 @@ def test(
     AP_accum, AP_accum_count = np.zeros(nC), np.zeros(nC)
     coco91class = coco80_to_coco91_class()
     
+    ###
+    # batch
+    ###
     for batch_i, (imgs, targets, paths, shapes, cond) in enumerate(dataloader):
         """
         bdd100k rainy valid set is 737.
         It sequentially aligned:
             rainy_daytime[0:396], rainy_night[396:682], rainy_dawndusk[682:737]
         """
+        print("cond: ", cond)
         t = time.time()
         """
         if batch_i > -1 and i < 396:
@@ -68,9 +75,15 @@ def test(
             raise IndexError("Valid Data is out of the range")
         """
         output = model(imgs.to(device), None, cond)
+        #output = model(imgs.to(device), None, 2)
         output = non_max_suppression(output, conf_thres=conf_thres, nms_thres=nms_thres)
 
-        # Compute average precision for each sample
+        ret0 = [] 
+        ###
+        # image
+        ###
+        
+        # Compute average precision for each image
         for si, (labels, detections) in enumerate(zip(targets, output)):
             seen += 1
 
@@ -106,6 +119,32 @@ def test(
                 # correct.extend([0 for _ in range(len(detections))])
                 mAPs.append(0), mR.append(0), mP.append(0)
                 continue
+            elif mAP_05_095:
+                #mAP@IoU[.5:.95]
+                target_cls = labels[:, 0]
+
+                # Extract target boxes as (x1, y1, x2, y2)
+                target_boxes = xywh2xyxy(labels[:, 1:5]) * img_size
+
+                detected = []
+                for i, iou in enumerate(np.arange(0.5,1,0.05)):
+                    iou_thres = iou
+                    correct.append([])
+                    detected.append([])
+                    for *pred_bbox, conf, obj_conf, obj_pred in detections:
+
+                        pred_bbox = torch.FloatTensor(pred_bbox).view(1, -1)
+                        # Compute iou with target boxes
+                        iou = bbox_iou(pred_bbox, target_boxes)
+                        # Extract index of largest overlap
+                        best_i = np.argmax(iou)
+                        # If overlap exceeds threshold and classification is correct mark as correct
+                        if iou[best_i] > iou_thres and obj_pred == labels[best_i, 0] and best_i not in detected[i]:
+                            correct[i].append(1)
+                            detected[i].append(best_i)
+                        else:
+                            correct[i].append(0)
+            
             else:
                 target_cls = labels[:, 0]
 
@@ -127,16 +166,32 @@ def test(
                     else:
                         correct.append(0)
 
-            # Compute Average Precision (AP) per class
-            AP, AP_class, R, P = ap_per_class(tp=correct,
-                                              conf=detections[:, 4],
-                                              pred_cls=detections[:, 6],
-                                              target_cls=target_cls)
-
-            # Accumulate AP per class
-            AP_accum_count += np.bincount(AP_class, minlength=nC)
-            AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
-
+            if not mAP_05_095:
+                # Compute Average Precision (AP) per class
+                AP, AP_class, R, P = ap_per_class(tp=correct,
+                                                  conf=detections[:, 4],
+                                                  pred_cls=detections[:, 6],
+                                                  target_cls=target_cls)
+                #print("AP, AP_class in image {}:\n {}\n {}".format(si, AP, AP_class))
+                # Accumulate AP per class
+                AP_accum_count += np.bincount(AP_class, minlength=nC)
+                AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
+                #print("AP_accum_count, AP_accum in image {}:\n {}\n {}".format(si, AP_accum_count, AP_accum))
+            else:
+                # Compute Average Precision (AP) per class
+                for i in range(len(correct)):
+                    AP, AP_class, R, P = ap_per_class(tp=correct[i],
+                                                      conf=detections[:, 4],
+                                                      pred_cls=detections[:, 6],
+                                                      target_cls=target_cls)
+                    # Accumulate AP per class
+                    AP_accum_count += np.bincount(AP_class, minlength=nC)
+                    AP_accum += np.bincount(AP_class, minlength=nC, weights=AP)
+                AP_accum_count /= len(correct)
+                AP_accum       /= len(correct)
+                ret = [AP_accum[i] / (AP_accum_count[i] + 1E-16) for i in range(len(correct))]
+                #print(np.mean(ret))
+                ret0.append(np.mean(ret))
             # Compute mean AP across all classes in this image, and append to image list
             mAPs.append(AP.mean())
             mR.append(R.mean())
@@ -152,11 +207,15 @@ def test(
               (seen, dataloader.nF, mean_P, mean_R, mean_mAP, time.time() - t))
 
     # Print mAP per class
-    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class:')
-
+    print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class in IoU {}:'.format(iou_thres if not mAP_05_095 else "[0.5:0.95]"))
+    print("ret0: ", np.mean(ret0)) 
+    total_mAP = []
     for i, c in enumerate(load_classes(data_cfg_dict['names'])):
         print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
-
+        total_mAP.append(AP_accum[i] / (AP_accum_count[i] + 1E-4))
+    
+    print("Total mAP: {}".format(np.mean(total_mAP)))
+    
     # Save JSON
     if save_json:
         imgIds = [Path(x).stem.split('_')[-1] for x in dataloader.img_files]
@@ -185,12 +244,13 @@ if __name__ == '__main__':
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
-    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
+    parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy_daytime.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
     #parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     #parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
     #parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
     parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
+    parser.add_argument('--mAP-05-095', type=bool, default=False, help='True if you want to measure mAP@IoU[.5:.95]')
     parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold')
     parser.add_argument('--nms-thres', type=float, default=0.4, help='iou threshold for non-maximum suppression') 
     parser.add_argument('--save-json', type=bool, default=False, help='save a cocoapi-compatible JSON results file')
@@ -207,6 +267,7 @@ if __name__ == '__main__':
             opt.batch_size,
             opt.img_size,
             opt.iou_thres,
+            opt.mAP_05_095,
             opt.conf_thres,
             opt.nms_thres,
             opt.save_json

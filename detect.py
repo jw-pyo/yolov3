@@ -5,6 +5,8 @@ import ast
 from pathlib import Path
 from sys import platform
 
+from multitask_models import *
+#from models import *
 from utils.datasets import *
 from utils.utils import *
 
@@ -23,7 +25,8 @@ def detect(
         save_txt=False,
         save_images=True,
         webcam=False,
-        multi_domain=False
+        multi_domain=False,
+        cond=0
 ):
     device = torch_utils.select_device()
     if os.path.exists(output):
@@ -32,10 +35,8 @@ def detect(
 
     # Initialize model
     if multi_domain:
-        from multitask_models import *
         model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
     else:
-        from models import *
         model = Darknet(cfg, img_size)
     # Load weights
     if weights.endswith('.pt'):  # pytorch format
@@ -45,7 +46,7 @@ def detect(
         model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
     else:  # darknet format
         load_darknet_weights(model, weights)
-
+    #load_darknet_weights(model, weights)
     model.to(device).eval()
 
     # Set Dataloader
@@ -72,7 +73,12 @@ def detect(
         if ONNX_EXPORT:
             torch.onnx.export(model, img, 'weights/model.onnx', verbose=True)
             return
-        pred = model(img)
+        
+        if multi_domain:
+            pred = model(img, None, cond)
+        else:
+            pred = model(img)
+        
         pred = pred[pred[:, :, 4] > conf_thres]  # remove boxes < threshold
 
         if len(pred) > 0:
@@ -116,15 +122,16 @@ def detect(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--cfg', type=str, default='cfg/bdd100k/bdd100k.cfg', help='cfg file path')
-    parser.add_argument('--shared-cfg', type=str, default='cfg/bdd100k/multidomain/shared.cfg', help='cfg file path')
-    parser.add_argument('--diff-cfgs', type=str, default=['cfg/bdd100k/multidomain/diff1.cfg','cfg/bdd100k/multidomain/diff2.cfg','cfg/bdd100k/multidomain/diff3.cfg'], help='cfg file path')
-    parser.add_argument('--weights', type=str, default='weights/rainy/best.pt', help='path to weights file')
+    parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
+    parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg','cfg/multidarknet/diff2.cfg','cfg/multidarknet/diff3.cfg']", help='cfg file path')
+    parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
     parser.add_argument('--images', type=str, default='val_videos/rainy_night/b2064e61-2beadd45', help='path to images')
     parser.add_argument('--class_name', type=str, default='cfg/bdd100k/bdd100k.data', help='path to configure file')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
     parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
     parser.add_argument('--nms-thres', type=float, default=0.4, help='iou threshold for non-maximum suppression. NMS remove the bbox higher than nms-thres')
     parser.add_argument('--multi-domain', type=bool, default=False, help='True if you use multi darknet')
+    parser.add_argument('--cond', type=int, default=0, help='Detect condition if you use multi-domain')
     opt = parser.parse_args()
     print(opt)
 
@@ -139,5 +146,6 @@ if __name__ == '__main__':
             img_size=opt.img_size,
             conf_thres=opt.conf_thres,
             nms_thres=opt.nms_thres,
-            multi_domain=opt.opt.multi_domain
+            multi_domain=opt.multi_domain,
+            cond=opt.cond
         )

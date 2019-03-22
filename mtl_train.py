@@ -10,6 +10,7 @@ from utils.utils import *
 
 
 def train(
+        cfg,
         shared_cfg,
         diff_cfgs,
         data_cfg,
@@ -23,11 +24,13 @@ def train(
         cond=0,
         weight_path="weights/rainy",
         result="result.txt",
-        ckpt=10
+        ckpt=10,
+        transfer_learning=False
 ):
     weights = weight_path
     latest = weights + 'latest.pt'
     best = weights + 'best.pt'
+    yolov3 = "weights/yolov3.weights"
     device = torch_utils.select_device()
 
     if multi_scale:  # pass maximum multi_scale size
@@ -40,6 +43,7 @@ def train(
 
     # Initialize model
     model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
+    darknet_model = Darknet(cfg, img_size)
 
     # Get dataloader
     dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True, multi_domain=True, classify_index=[2522, 4730])
@@ -49,11 +53,13 @@ def train(
     start_epoch = 0
     best_loss = float('inf')
     if resume:
-        checkpoint = model.load_weights(weights)
-        #checkpoint = torch.load(latest, map_location='cpu') jwpyo
+
+
+        #checkpoint = model.load_weights(weights)
+        checkpoint = torch.load(latest, map_location='cpu') #jwpyo
 
         # Load weights to resume from
-        # model.load_state_dict(checkpoint['model']) jwpyo
+        model.load_state_dict(checkpoint['model']) #jwpyo
 
         # if torch.cuda.device_count() > 1:
         #   model = nn.DataParallel(model)
@@ -63,6 +69,12 @@ def train(
         # for i, (name, p) in enumerate(model.named_parameters()):
         #     p.requires_grad = True if (p.shape[0] == 255) else False
 
+        # Freeze certain layers 
+        # for i, (name, p) in enumerate(model.named_parameters()):
+        #     if name.startswith("___"):     
+        #       p.requires_grad = False (freeze)
+
+        
         # Set optimizer
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
 
@@ -74,7 +86,86 @@ def train(
         del checkpoint  # current, saved
 
     else:
-        if shared_cfg.startswith('bdd100k'):
+        if transfer_learning:
+            #TODO
+            # apply the transfer learning up to cutoff layer
+            
+            cutoff = 70 # it does not contain cutoff
+            model_dict = model.state_dict()
+            
+            # load the original yolov3 weights to pretrained_dict_
+            darknet_model.load_weights(yolov3)
+            pretrained_dict = darknet_model.state_dict()
+            pretrained_dict_ = copy.copy(pretrained_dict)
+            
+            # change the layer's name corresponding with multi-domain's layer
+            # and copy the diff branch to others.
+            for k, v in pretrained_dict.items():
+                if int(k.split(".")[1]) > 74:
+                    del pretrained_dict_[k]
+                    k_arr = k.split(".")
+                    k_arr2_arr = k_arr[2].split("_")
+                    k_arr2_arr[-1] = str(int(k_arr[1]) - 75)
+                    k_arr2 = "_".join(k_arr2_arr)
+                    k_arr[2] = k_arr2
+                    k = ".".join(k_arr)
+                    pretrained_dict_[k] = v
+            for k, v in pretrained_dict.items():
+                index = int(k.split(".")[1])
+                if index > 74:
+                    k_arr = k.split(".")
+                    k_arr[1] = str(int(k_arr[1]) + 32)
+                    k_arr2_arr = k_arr[2].split("_")
+                    k_arr2_arr[-1] = str(int(k_arr[1]) - (75+32))
+                    k_arr2 = "_".join(k_arr2_arr)
+                    k_arr[2] = k_arr2
+                    k = ".".join(k_arr)
+                    pretrained_dict_[k] = v
+            for k, v in pretrained_dict.items():
+                index = int(k.split(".")[1])
+                if index > 74:
+                    k_arr = k.split(".")
+                    k_arr[1] = str(int(k_arr[1]) + 32+32)
+                    k_arr2_arr = k_arr[2].split("_")
+                    k_arr2_arr[-1] = str(int(k_arr[1]) - (75+32+32))
+                    k_arr2 = "_".join(k_arr2_arr)
+                    k_arr[2] = k_arr2
+                    k = ".".join(k_arr)
+                    pretrained_dict_[k] = v
+            #pretrained_dict = {k: v for k, v in pretrained_dict.items() if int(k.split(".")[1]) < cutoff} 
+            
+            # change the pretrained_dict's layer whose shape is different from multi-domain network. Then initialize Gaussian.
+            for k, v in model_dict.items():
+                #try:    
+                    if v.shape != pretrained_dict_[k].shape:
+                        pretrained_dict_[k] = torch.empty(v.shape)
+                        #TODO: conv, batch
+                        if k.split(".")[2].startswith("conv"):
+                            nn.init.normal_(pretrained_dict_[k], 0.0, 0.03)
+                        elif k.split(".")[2].startswith("batch_norm") and k.split(".")[3] == "weight":
+                            nn.init.normal_(pretrained_dict_[k], 1.0, 0.03)
+                        elif k.split(".")[2].startswith("batch_norm") and k.split(".")[3] == "bias":
+                            nn.init.constant_(pretrained_dict_[k], 0.0)
+                        else:
+                            nn.init_notrmal_(pretrained_dict_[k], torch.mean(v), torch.std(v))
+
+                        print(k, v.shape)
+                #except KeyError:
+                #    pass
+
+            model_dict.update(pretrained_dict_)
+            model.load_state_dict(model_dict)
+            #for name, p in model.named_parameters():
+            #    print(name, p.shape)
+
+            # freeze layer 
+            for i, (name, p) in enumerate(model.named_parameters()):
+                if int(name.split('.')[1]) < cutoff:  # freeze layer. if layer < 75
+                    p.requires_grad = False
+                else:
+                    p.requires_grad = True
+        
+        elif shared_cfg.startswith('bdd100k'):
             load_darknet_weights(model, "weights/yolov3.weights")
             cutoff = 75
         else:
@@ -84,6 +175,15 @@ def train(
         #    model = nn.DataParallel(model)
         
         model.to(device).train()
+        
+        # Transfer learning (train only YOLO layers)
+        # for i, (name, p) in enumerate(model.named_parameters()):
+        #     p.requires_grad = True if (p.shape[0] == 255) else False
+
+        # Freeze certain layers 
+        # for i, (name, p) in enumerate(model.named_parameters()):
+        #     if name.startswith("___"):     
+        #       p.requires_grad = False (freeze)
 
         # Set optimizer
         optimizer = torch.optim.SGD(filter(lambda x: x.requires_grad, model.parameters()), lr=lr0, momentum=.9)
@@ -202,6 +302,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100, help='number of epochs')
     parser.add_argument('--batch-size', type=int, default=15, help='size of each image batch')
     parser.add_argument('--accumulated-batches', type=int, default=1, help='number of batches before optimizer step')
+    parser.add_argument('--cfg', type=str, default='cfg/yolov3.cfg', help='cfg file path')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy.data', help='coco.data file path')
@@ -212,12 +313,14 @@ if __name__ == '__main__':
     parser.add_argument('--weight_path', type=str, default="weights/rainy/multidomain/", help="weight path")
     parser.add_argument('--result', type=str, default="result/rainy/multidomain/rainy_md.txt", help="result txt file")
     parser.add_argument('--ckpt', type=int, default=10, help="save the weight by this value")
+    parser.add_argument('--transfer-learning', type=bool, default=False, help="transfer learning")
     opt = parser.parse_args()
     print(opt, end='\n\n')
 
     init_seeds()
 
     train(
+        opt.cfg,
         opt.shared_cfg,
         opt.diff_cfgs,
         opt.data_cfg,
@@ -230,5 +333,6 @@ if __name__ == '__main__':
         cond=opt.cond,
         weight_path=opt.weight_path,
         result=opt.result,
-        ckpt=opt.ckpt
+        ckpt=opt.ckpt,
+        transfer_learning=opt.transfer_learning
     )
