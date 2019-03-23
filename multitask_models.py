@@ -264,6 +264,26 @@ class YOLOLayer(nn.Module):
             # reshape from [1, 3, 13, 13, 85] to [1, 507, 85]
             return p.view(bs, -1, 5 + self.nC)
 
+class Classifier(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.fc2 = nn.Linear(120, 84)
+        self.fc3 = nn.Linear(84, 3)
+
+    def forward(self, x):
+        img = x
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = x.view(-1, 16 * 5 * 5)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        print("This image is classified as {}\n".format(x))
+        return x, img
 
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""
