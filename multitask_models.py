@@ -132,11 +132,11 @@ def create_modules(module_defs, diff=False):
     else:
     """
     hyperparams = module_defs.pop(0)
-
+    yolo_layer_count = [0]
     output_filters = [int(hyperparams["channels"])]
     module_list = nn.ModuleList()
     for i, module_def in enumerate(module_defs):
-        modules, filters = parse_module(i, module_def, hyperparams, output_filters)
+        modules, filters = parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count)
         # Register module list and number of output filters
         module_list.append(modules)
         if filters is not None:
@@ -270,12 +270,12 @@ class Darknet(nn.Module):
 
     def __init__(self, cfg_path, img_size=416):
         super(Darknet, self).__init__()
-        self.module_defs = parse_model_cfg(config_path)
+        self.module_defs = parse_model_cfg(cfg_path)
         self.module_defs[0]['cfg'] = cfg_path
         self.module_defs[0]['height'] = img_size
         self.hyperparams, self.module_list = create_modules(self.module_defs)
         self.img_size = img_size
-        self.loss_names = ["x", "y", "w", "h", "conf", "cls", "recall", "precision"]
+        self.loss_names = ['loss', 'xy', 'wh', 'conf', 'cls', 'nT']
         self.losses = []
 
     def forward(self, x, targets=None, var=0):
@@ -313,7 +313,7 @@ class Darknet(nn.Module):
             self.losses['nT'] /= 3
         return sum(output) if is_training else torch.cat(output, 1)
 
-    def load_weights(self, weights_path):
+    def load_weights(self, weights_path, cutoff=-1):
         """Parses and loads the weights stored in 'weights_path'"""
 
         # Open the weights file
@@ -328,7 +328,7 @@ class Darknet(nn.Module):
         fp.close()
 
         ptr = 0
-        for i, (module_def, module) in enumerate(zip(self.module_defs, self.module_list)):
+        for i, (module_def, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
             if module_def["type"] == "convolutional":
                 conv_layer = module[0]
                 if module_def["batch_normalize"]:
@@ -403,6 +403,74 @@ def create_grids(self, img_size, nG):
     # build wh gains
     self.anchor_vec = self.anchors / self.stride
     self.anchor_wh = self.anchor_vec.view(1, self.nA, 1, 1, 2)
+
+def load_darknet_weights_to_md(self, weights, cutoff=-1):
+    # Parses and loads the weights to multi-domain network stored in 'weights'
+    # cutoff: save layers between 0 and cutoff (if cutoff = -1 all are saved)
+    #TODO
+    weights_file = weights.split(os.sep)[-1]
+
+    # Try to download weights if not available locally
+    if not os.path.isfile(weights):
+        try:
+            os.system('wget https://pjreddie.com/media/files/' + weights_file + ' -O ' + weights)
+        except IOError:
+            print(weights + ' not found')
+
+    # Establish cutoffs
+    if weights_file == 'darknet53.conv.74':
+        cutoff = 75
+    elif weights_file == 'yolov3-tiny.conv.15':
+        cutoff = 15
+    elif weights_file == 'yolov3.weights': #shared 75, diff 32
+        cutoff = 75
+    # Open the weights file
+    fp = open(weights, 'rb')
+    header = np.fromfile(fp, dtype=np.int32, count=5)  # First five are header values
+
+    # Needed to write header when saving weights
+    self.header_info = header
+
+    self.seen = header[3]  # number of images seen during training
+    weights = np.fromfile(fp, dtype=np.float32)  # The rest are weights
+    fp.close()
+
+    ptr = 0
+    for i, (module_def, module) in enumerate(zip(self.module_defs[:cutoff], self.module_list[:cutoff])):
+        if module_def['type'] == 'convolutional':
+            conv_layer = module[0]
+            if module_def['batch_normalize']:
+                # Load BN bias, weights, running mean and running variance
+                bn_layer = module[1]
+                num_b = bn_layer.bias.numel()  # Number of biases
+                # Bias
+                bn_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.bias)
+                bn_layer.bias.data.copy_(bn_b)
+                ptr += num_b
+                # Weight
+                bn_w = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.weight)
+                bn_layer.weight.data.copy_(bn_w)
+                ptr += num_b
+                # Running Mean
+                bn_rm = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.running_mean)
+                bn_layer.running_mean.data.copy_(bn_rm)
+                ptr += num_b
+                # Running Var
+                bn_rv = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.running_var)
+                bn_layer.running_var.data.copy_(bn_rv)
+                ptr += num_b
+            else:
+                # Load conv. bias
+                num_b = conv_layer.bias.numel()
+                conv_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(conv_layer.bias)
+                conv_layer.bias.data.copy_(conv_b)
+                ptr += num_b
+            # Load conv. weights
+            num_w = conv_layer.weight.numel()
+            conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight)
+            conv_layer.weight.data.copy_(conv_w)
+            ptr += num_w
+
 
 class SubModule(nn.Module):
     def __init__(self, embedding):
@@ -585,9 +653,10 @@ class MultiDarknet(nn.Module):
 
         # fetch the shared weight first, then individual branch
         for i, (module_def, module) in enumerate(zip( \
-                self.shared_module_defs + sum(self.diff_module_defs_list, []), \
-                self.module_list_shared + sum(self.module_list_diff, []))):
-
+               # self.shared_module_defs + sum(self.diff_module_defs_list, []), \
+               # self.module_list_shared + sum(self.module_list_diff, []))):
+                 self.module_def,
+                 self.module_list)):
             if module_def["type"] == "convolutional":
                 conv_layer = module[0]
                 if module_def["batch_normalize"]:

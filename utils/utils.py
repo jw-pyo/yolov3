@@ -483,4 +483,8 @@ def plot_results(out_path="results*.txt"):
             plt.title(s[i])
             if i == 0:
                 plt.legend()
-    fig.savefig('result.png')
+    
+    out_arr = files[0].split(".")
+    out_arr[1] = "png"
+    out_file = ".".join(out_arr)
+    fig.savefig(out_file)
