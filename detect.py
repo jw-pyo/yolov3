@@ -37,6 +37,7 @@ def detect(
     if multi_domain:
         model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
         classifier = Classifier()
+        classifier.to(device).eval()
     else:
         model = Darknet(cfg, img_size)
     # Load weights
@@ -76,8 +77,8 @@ def detect(
             return
         
         if multi_domain:
-            cond, img = classifier(img)
-            pred = model(img, None, cond)
+            cond_, img = classifier(img)
+            pred = model(img, None, cond_)
         else:
             pred = model(img)
         

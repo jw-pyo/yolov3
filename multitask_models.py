@@ -265,16 +265,18 @@ class YOLOLayer(nn.Module):
             return p.view(bs, -1, 5 + self.nC)
 
 class Classifier(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
+    def __init__(self, img_size=416):
+        super(Classifier, self).__init__()
+        self.conv1 = nn.Conv2d(3, 6, 208)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
+        self.conv2 = nn.Conv2d(6, 16, 94)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 3)
 
     def forward(self, x):
+        #FloatTensor = torch.cuda.FloatTensor if x.is_cuda else torch.FloatTensor
+        #x = x.type(torch.FloatTensor)
         img = x
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
@@ -282,8 +284,18 @@ class Classifier(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
-        print("This image is classified as {}\n".format(x))
-        return x, img
+        
+        #softmax and pick one that have the highest probability
+        x = F.softmax(x)
+        index = None
+        print("hihhih", x.data)
+        print("hihhih", torch.max(x).data)
+        for i in range(3):
+            if torch.eq(torch.max(x).data, x.data[0][i]):
+                index = i
+        print("index: ", index)
+        print("This image is classified as {}\n".format(x.data[0][index]))
+        return int(x.data[0][index]), img
 
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""
@@ -519,7 +531,7 @@ class MultiDarknet(nn.Module):
         self.diff2_module_list = SubModule(module_list_shared)
         self.diff3_module_list = SubModule(module_list_shared)
         """
-
+        # print(module_list_shared)
         # module_def, module_list
         list_of_layers = list(module_list_shared.children())
         
