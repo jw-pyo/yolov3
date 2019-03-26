@@ -56,8 +56,11 @@ class LoadImages:  # for inference
 
 
 class LoadWebcam:  # for inference
-    def __init__(self, img_size=416):
-        self.cam = cv2.VideoCapture(0)
+    def __init__(self, img_size=416, video_file=None):
+        if video_file is None:
+            self.cam = cv2.VideoCapture(0)
+        else:
+            self.cam = cv2.VideoCapture(video_file)
         self.height = img_size
 
     def __iter__(self):
@@ -72,9 +75,14 @@ class LoadWebcam:  # for inference
 
         # Read image
         ret_val, img0 = self.cam.read()
-        assert ret_val, 'Webcam Error'
+        if ret_val is False:
+            print("No read frame")
+            return None, None, None
+
+        
+        #assert ret_val, 'Webcam Error'
         img_path = 'webcam_%g.jpg' % self.count
-        img0 = cv2.flip(img0, 1)
+        img0 = cv2.flip(img0, 180)
 
         # Padded resize
         img, _, _, _ = letterbox(img0, height=self.height)
@@ -89,7 +97,49 @@ class LoadWebcam:  # for inference
     def __len__(self):
         return 0
 
+class LoadVideo:  # for inference
+    def __init__(self, img_size=416, video_file=None):
+        if video_file is None:
+            self.cam = cv2.VideoCapture(0)
+        else:
+            self.cam = cv2.VideoCapture(video_file)
+        self.height = img_size
+        self.total_frame = int(self.cam.get(cv2.CAP_PROP_FRAME_COUNT))
 
+    def __iter__(self):
+        self.count = -1
+        return self
+
+    def __next__(self):
+        self.count += 1
+        if self.count == self.total_frame:  # esc to quit
+            cv2.destroyAllWindows()
+            raise StopIteration
+
+        # Read image
+        ret_val, img0 = self.cam.read()
+        if ret_val is False:
+            print("No read frame")
+            return None, None, None
+
+        
+        #assert ret_val, 'Webcam Error'
+        img_path = 'webcam_%g.jpg' % self.count
+        img0 = cv2.flip(img0, 1)
+
+        # Padded resize
+        img, _, _, _ = letterbox(img0, height=self.height)
+
+        # Normalize RGB
+        img = img[:, :, ::-1].transpose(2, 0, 1)
+        img = np.ascontiguousarray(img, dtype=np.float32)
+        img /= 255.0
+
+        return img_path, img, img0
+
+    def __len__(self):
+        return self.total_frame
+    
 class LoadImagesAndLabels:  # for training
     def __init__(self, path, batch_size=1, img_size=608, multi_scale=False, augment=False, multi_domain=False, classify_index=[]):
         with open(path, 'r') as file:

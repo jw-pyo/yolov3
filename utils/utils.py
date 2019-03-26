@@ -2,6 +2,7 @@ import glob
 import random
 
 import cv2
+from cv2 import VideoWriter
 import matplotlib.pyplot as plt
 import numpy as np
 import torch

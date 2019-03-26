@@ -23,9 +23,11 @@ def detect(
         conf_thres=0.3,
         nms_thres=0.45,
         save_txt=False,
-        save_images=True,
+        save_images=False,
         webcam=False,
         multi_domain=False,
+        video_detect=False,
+        video_inf_file='output/out.avi',
         cond=0
 ):
     device = torch_utils.select_device()
@@ -55,6 +57,14 @@ def detect(
     if webcam:
         save_images = False
         dataloader = LoadWebcam(img_size=img_size)
+    elif video_detect:
+        dataloader = LoadVideo(img_size=img_size, video_file=images)
+        frame_size = dataloader.cam.get(3), dataloader.cam.get(4)
+        fourcc = cv2.VideoWriter_fourcc('m','p','4','v')
+        video = cv2.VideoWriter()
+        success = video.open(video_inf_file, fourcc, 30, (1280,720), True)
+        if not success:
+            raise Error("videoWriter has not opened.")
     else:
         dataloader = LoadImages(images, img_size=img_size)
 
@@ -64,11 +74,15 @@ def detect(
 
     for i, (path, img, im0) in enumerate(dataloader):
         t = time.time()
+        print(i)
         if webcam:
             print('webcam frame %g: ' % (i + 1), end='')
+        elif video_detect:
+            print('video frame %g: ' % (i + 1), end='')
         else:
             print('image %g/%g %s: ' % (i + 1, len(dataloader), path), end='')
-        save_path = str(Path(output) / Path(path).name)
+            if save_txt or save_images:
+                save_path = str(Path(output) / Path(path).name)
 
         # Get detections
         img = torch.from_numpy(img).unsqueeze(0).to(device)
@@ -114,12 +128,17 @@ def detect(
 
         if save_images:  # Save generated image with detections
             cv2.imwrite(save_path, im0)
+        if video_detect:
+            video.write(im0)
 
         if webcam:  # Show live webcam
             cv2.imshow(weights, im0)
 
     if save_images and (platform == 'darwin'):  # linux/macos
         os.system('open ' + output + ' ' + save_path)
+    elif video_detect:
+        video.release()
+        print("video has saved!")
 
 
 if __name__ == '__main__':
@@ -128,12 +147,14 @@ if __name__ == '__main__':
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg','cfg/multidarknet/diff2.cfg','cfg/multidarknet/diff3.cfg']", help='cfg file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
-    parser.add_argument('--images', type=str, default='val_videos/rainy_night/b2064e61-2beadd45', help='path to images')
+    parser.add_argument('--inputs', type=str, default='val_videos/rainy_night/b2064e61-2beadd45', help='path to images or video')
     parser.add_argument('--class_name', type=str, default='cfg/bdd100k/bdd100k.data', help='path to configure file')
     parser.add_argument('--img-size', type=int, default=32 * 13, help='size of each image dimension')
     parser.add_argument('--conf-thres', type=float, default=0.6, help='object confidence threshold. NMS remove the bbox lower than conf-thres')
     parser.add_argument('--nms-thres', type=float, default=0.4, help='iou threshold for non-maximum suppression. NMS remove the bbox higher than nms-thres')
     parser.add_argument('--multi-domain', type=bool, default=False, help='True if you use multi darknet')
+    parser.add_argument('--video-detect', type=bool, default=False, help='True if you want to detect video files')
+    parser.add_argument('--video-inf-file', type=str, default="output/out.avi", help='Inferenced video path')
     parser.add_argument('--cond', type=int, default=0, help='Detect condition if you use multi-domain')
     opt = parser.parse_args()
     print(opt)
@@ -144,11 +165,13 @@ if __name__ == '__main__':
             opt.shared_cfg,
             opt.diff_cfgs,
             opt.weights,
-            opt.images,
+            opt.inputs,
             opt.class_name,
             img_size=opt.img_size,
             conf_thres=opt.conf_thres,
             nms_thres=opt.nms_thres,
             multi_domain=opt.multi_domain,
+            video_detect=opt.video_detect,
+            video_inf_file=opt.video_inf_file,
             cond=opt.cond
         )

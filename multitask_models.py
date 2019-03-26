@@ -293,9 +293,9 @@ class Classifier(nn.Module):
         for i in range(3):
             if torch.eq(torch.max(x).data, x.data[0][i]):
                 index = i
-        print("index: ", index)
-        print("This image is classified as {}\n".format(x.data[0][index]))
-        return int(x.data[0][index]), img
+        print("This image is classified as {}\n".format(index))
+        #x.data[0][index]
+        return index, img
 
 class Darknet(nn.Module):
     """YOLOv3 object detection model"""

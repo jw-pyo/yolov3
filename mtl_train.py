@@ -236,7 +236,6 @@ def train(
             else:
                 raise IndexError("Train Data is out of the range")
             """
-             
             
             if sum([len(x) for x in targets]) < 1:  # if no targets continue
                 continue
