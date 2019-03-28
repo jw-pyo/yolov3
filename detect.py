@@ -31,10 +31,13 @@ def detect(
         cond=0
 ):
     device = torch_utils.select_device()
+    
+    """
+    #jwpyo: uncomment this lines if you want to remove entire output/ contents for every detection.
     if os.path.exists(output):
         shutil.rmtree(output)  # delete output folder
     os.makedirs(output)  # make new output folder
-
+    """
     # Initialize model
     if multi_domain:
         model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
