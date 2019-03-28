@@ -61,6 +61,8 @@ def detect(
         dataloader = LoadVideo(img_size=img_size, video_file=images)
         frame_size = dataloader.cam.get(3), dataloader.cam.get(4)
         fourcc = cv2.VideoWriter_fourcc('m','p','4','v')
+        #fourcc = cv2.VideoWriter_fourcc('X','V','I','D')
+        #fourcc = cv2.VideoWriter_fourcc('h','2','6','4')
         video = cv2.VideoWriter()
         success = video.open(video_inf_file, fourcc, 30, (1280,720), True)
         if not success:
@@ -75,6 +77,12 @@ def detect(
     for i, (path, img, im0) in enumerate(dataloader):
         t = time.time()
         print(i)
+        #print(img.shape)
+        #cv2.imwrite('img.png', img.permute(1,0,2))
+        #im0 = im0.transpose(1, 0, 2)
+        #print(im0.shape)
+        #cv2.imwrite('im0.png', im0)
+        #break
         if webcam:
             print('webcam frame %g: ' % (i + 1), end='')
         elif video_detect:
@@ -91,8 +99,8 @@ def detect(
             return
         
         if multi_domain:
-            cond_, img = classifier(img)
-            pred = model(img, None, cond_)
+            #cond_, img = classifier(img)
+            pred = model(img, None, cond)
         else:
             pred = model(img)
         
@@ -129,6 +137,7 @@ def detect(
         if save_images:  # Save generated image with detections
             cv2.imwrite(save_path, im0)
         if video_detect:
+            #im0 = im0.transpose(1, 0, 2)
             video.write(im0)
 
         if webcam:  # Show live webcam

@@ -125,7 +125,8 @@ class LoadVideo:  # for inference
         
         #assert ret_val, 'Webcam Error'
         img_path = 'webcam_%g.jpg' % self.count
-        img0 = cv2.flip(img0, 1)
+        #img0 = cv2.rotate(img0, rotateCode=cv2.ROTATE_90_COUNTERCLOCKWISE)
+        #img0 = cv2.flip(img0, 1)
 
         # Padded resize
         img, _, _, _ = letterbox(img0, height=self.height)
