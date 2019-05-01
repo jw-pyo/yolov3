@@ -15,6 +15,7 @@ def test(
         diff_cfgs,
         data_cfg,
         weights,
+        import_model=None,
         batch_size=16,
         img_size=416,
         iou_thres=0.5,
@@ -22,6 +23,7 @@ def test(
         conf_thres=0.3,
         nms_thres=0.45,
         save_json=False
+
 ):
     device = torch_utils.select_device()
 
@@ -30,13 +32,16 @@ def test(
     nC = int(data_cfg_dict['classes'])  # number of classes (80 for COCO)
     test_path = data_cfg_dict['valid']
 
-    # Initialize model
-    model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
-    # Load weights
-    if weights.endswith('.pt'):  # pytorch format
-        model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
-    else:  # darknet format
-        load_darknet_weights(model, weights)
+    if import_model is not None:
+        model = import_model
+    else:
+        # Initialize model
+        model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
+        # Load weights
+        if weights.endswith('.pt'):  # pytorch format
+            model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
+        else:  # darknet format
+            load_darknet_weights(model, weights)
 
     model.to(device).eval()
     
@@ -208,7 +213,6 @@ def test(
 
     # Print mAP per class
     print('%11s' * 5 % ('Image', 'Total', 'P', 'R', 'mAP') + '\n\nmAP Per Class in IoU {}:'.format(iou_thres if not mAP_05_095 else "[0.5:0.95]"))
-    print("ret0: ", np.mean(ret0)) 
     total_mAP = []
     for i, c in enumerate(load_classes(data_cfg_dict['names'])):
         print('%15s: %-.4f' % (c, AP_accum[i] / (AP_accum_count[i] + 1E-16)))
@@ -246,6 +250,7 @@ if __name__ == '__main__':
     parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
     parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy_daytime.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
+    parser.add_argument('--import-model', type=str, default=None, help='True if you import model in code, not cfg files')
     #parser.add_argument('--iou-thres', type=float, default=0.5, help='iou threshold required to qualify as detected')
     #parser.add_argument('--conf-thres', type=float, default=0.3, help='object confidence threshold')
     #parser.add_argument('--nms-thres', type=float, default=0.45, help='iou threshold for non-maximum suppression')
@@ -264,6 +269,7 @@ if __name__ == '__main__':
             opt.diff_cfgs,
             opt.data_cfg,
             opt.weights,
+            opt.import_model,
             opt.batch_size,
             opt.img_size,
             opt.iou_thres,

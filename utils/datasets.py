@@ -3,7 +3,7 @@ import math
 import os
 import random
 import copy 
-
+from functools import reduce
 import cv2
 import numpy as np
 import torch
@@ -53,6 +53,20 @@ class LoadImages:  # for inference
 
     def __len__(self):
         return self.nF  # number of files
+    def profile(self):
+        MB = 1024* 1024
+        GB = 1024 * MB
+        total_bytes = 0
+        for (path, img, img0) in self:
+            size_a = img.size
+            size_b = img0.size
+            print(size_a, size_b)
+            #count_a = reduce((lambda x,y: x*y), size_a)
+            #count_b = reduce((lambda x,y: x*y), size_b)
+            total_bytes += size_a + size_b
+        print("Total number of dataloaders' bytes: {}".format(total_bytes))
+        print("Capacity of dataloaders   : {}MB = {}GB".format(total_bytes*4/(1*MB + 1e-7), total_bytes*4/(1*GB + 1e-7)))
+
 
 
 class LoadWebcam:  # for inference
@@ -125,7 +139,8 @@ class LoadVideo:  # for inference
         
         #assert ret_val, 'Webcam Error'
         img_path = 'webcam_%g.jpg' % self.count
-        #img0 = cv2.rotate(img0, rotateCode=cv2.ROTATE_90_COUNTERCLOCKWISE)
+        #img0 = cv2.rotate(img0, rotateCode=cv2.ROTATE_90_CLOCKWISE) #uncomment if you want to inference BDD100k
+        #img0 = cv2.rotate(img0, rotateCode=cv2.ROTATE_90_COUNTERCLOCKWISE) #uncomment if you want to inference BDD100k
         #img0 = cv2.flip(img0, 1)
 
         # Padded resize

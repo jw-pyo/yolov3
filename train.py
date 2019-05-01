@@ -2,8 +2,8 @@ import argparse
 import time
 
 import test  # Import test.py to get mAP after each epoch
-from models import *
-#from multitask_models import *
+from models import load_darknet_weights
+from multitask_models import *
 
 from utils.datasets import *
 from utils.utils import *
@@ -44,7 +44,7 @@ def train(
     dataloader = LoadImagesAndLabels(train_path, batch_size, img_size, multi_scale=multi_scale, augment=True)
 
     lr0 = 0.001
-    cutoff = -1  # backbone reaches to cutoff layer
+    cutoff = 10  # backbone reaches to cutoff layer
     start_epoch = 0
     best_loss = float('inf')
     if resume:
@@ -79,12 +79,32 @@ def train(
         elif cfg.endswith('yolov3-tiny.cfg'):
             load_darknet_weights(model, weights + 'yolov3-tiny.conv.15')
             cutoff = 15
-        elif cfg.startswith('bdd100k'):
-            load_darknet_weights(model, "weights/yolov3.weights")
-            cutoff = 75
-        cutoff = 70
-        # if torch.cuda.device_count() > 1:
-        #    model = nn.DataParallel(model)
+        elif cfg.startswith('cfg/bdd100k'):
+            #transfer learning
+            print("Apply transfer learning for bdd100k cfg")
+            tmp_model = Darknet('cfg/yolov3.cfg', img_size)
+            load_darknet_weights(tmp_model, "weights/yolov3.weights")
+            pretrained_dict = tmp_model.state_dict()
+
+            for k, v in model.state_dict().items():
+                if v.shape != pretrained_dict[k].shape:
+                    pretrained_dict[k] = torch.empty(v.shape)
+                    #TODO: conv, batch
+                    if k.split(".")[2].startswith("conv"):
+                        nn.init.normal_(pretrained_dict[k], 0.0, 0.03)
+                    elif k.split(".")[2].startswith("batch_norm") and k.split(".")[3] == "weight":
+                        nn.init.normal_(pretrained_dict[k], 1.0, 0.03)
+                    elif k.split(".")[2].startswith("batch_norm") and k.split(".")[3] == "bias":
+                        nn.init.constant_(pretrained_dict[k], 0.0)
+                    else:
+                        nn.init_normal_(pretrained_dict[k], torch.mean(v), torch.std(v))
+
+                    print(k, v.shape)
+            model.load_state_dict(pretrained_dict) 
+            del tmp_model
+        #freeze_layer
+        cutoff = 10
+        model.freeze_layers(cutoff)
         model.to(device).train()
 
         # Set optimizer
@@ -96,7 +116,7 @@ def train(
     t0 = time.time()
     model_info(model)
     n_burnin = min(round(dataloader.nB / 5), 1000)  # number of burn-in batches
-    for epoch in range(1, epochs):
+    for epoch in range(1, epochs+1):
         epoch += start_epoch
 
         print(('%8s%12s' + '%10s' * 7) % (

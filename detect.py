@@ -55,7 +55,7 @@ def detect(
         load_darknet_weights(model, weights)
     #load_darknet_weights(model, weights)
     model.to(device).eval()
-
+    model.get_n_params()
     # Set Dataloader
     if webcam:
         save_images = False
@@ -72,10 +72,11 @@ def detect(
             raise Error("videoWriter has not opened.")
     else:
         dataloader = LoadImages(images, img_size=img_size)
+        dataloader.profile()
 
     # Get classes and colors
     classes = load_classes(parse_data_cfg(class_name)['names'])
-    colors = [[random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)] for _ in range(len(classes))]
+    colors = [[i*15, i*15, 255-i*15] for i in range(len(classes))]
 
     for i, (path, img, im0) in enumerate(dataloader):
         t = time.time()
