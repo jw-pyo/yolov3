@@ -503,34 +503,19 @@ def load_darknet_weights_to_md(self, weights, cutoff=-1):
             conv_layer.weight.data.copy_(conv_w)
             ptr += num_w
 
-
-class SubModule(nn.Module):
-    def __init__(self, embedding):
-        super(SubModule, self).__init__()
-        self.embedding = embedding
-        self.diff = parse_model_cfg("cfg/multidarknet/diff1.cfg")
-    def forward(self, input):
-        return self.diff(self.embedding(input))
-
-
 class MultiDarknet(nn.Module):
     """YOLOv3 object detection model"""
 
-    def __init__(self, shared_config_path, diff_config_paths, img_size=416):
+    def __init__(self, shared_config_path, diff_config_path, num_branches, img_size=416):
         super(MultiDarknet, self).__init__()
         shared_module_defs = parse_model_cfg(shared_config_path) #the Module's type of python list 
-        diff_module_defs_list = [parse_model_cfg(i) for i in diff_config_paths]
+        diff_module_defs_list = [parse_model_cfg(diff_config_path) for _ in range(num_branches)]
         #TODO
         
         self.hyperparams, \
         module_list_shared, \
         module_list_diff = create_multitask_modules(shared_module_defs, \
                                                         diff_module_defs_list)
-        """
-        self.diff1_module_list = SubModule(module_list_shared)
-        self.diff2_module_list = SubModule(module_list_shared)
-        self.diff3_module_list = SubModule(module_list_shared)
-        """
         # print(module_list_shared)
         # module_def, module_list
         list_of_layers = list(module_list_shared.children())
@@ -564,27 +549,12 @@ class MultiDarknet(nn.Module):
         output = []
         self.losses = defaultdict(float)
         layer_outputs = []
-        """ 
-        module_defs = self.shared_module_defs
-        module_defs.extend(self.diff_module_defs_list[cond])
-        module_list = self.module_list_shared
-        module_list.extend(self.module_list_diff[cond])
-        """
         # for i, (module_def, module_) in enumerate(zip(module_defs, module_list)):
         # print("length of shared_module_defs: ", len(self.shared_module_defs))
         
         #shared layer
         for i, (module_def, module_) in enumerate(zip( \
                 self.module_def[0:75], self.module_list[0:75])):
-            """
-            f = open("txt.txt", "a")
-            try:
-                f.write("weight: {}\n".format(module_[0].weight.shape))
-                f.close()
-            except:
-                f.write("skip print weight because it's YOLO\n")
-                f.close()
-            """
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module_(x)
             elif module_def["type"] == "route":
@@ -622,18 +592,6 @@ class MultiDarknet(nn.Module):
         for i, (module_def, module_) in enumerate(zip( \
             self.module_def[75 + 32*cond : 75 + 32*(cond+1)], \
             self.module_list[75 + 32*cond : 75 + 32*(cond+1)])): 
-            #self.diff[75:107])):
-            """
-            print("i: ", i, module_def)
-            print(x.shape)
-            f = open("txt.txt", "a")
-            try:
-                f.write("weight: {}\n".format(module_[0].weight.shape))
-                f.close()
-            except:
-                f.write("skip print weight because it's YOLO\n")
-                f.close()
-            """
             module_ = module_.cuda()
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module_(x)
@@ -658,13 +616,9 @@ class MultiDarknet(nn.Module):
                 output.append(x)  
             layer_outputs.append(x)
         
-        #print("shared {}\n diff1 {}\n diff2 {}\n diff3 {}\n".format(
-        #    self.module_list[5][0].weight[5][10][1], self.module_list[89][0].weight[5][10:13].permute(2,1,0), self.module_list[121][0].weight[5][10:13].permute(2,1,0), self.module_list[153][0].weight[5][10:13].permute(2,1,0)))
         if is_training:
             self.losses['nT'] /= 3
         
-        #self.losses["recall"] /= 3
-        #self.losses["precision"] /= 3
         return sum(output) if is_training else torch.cat(output, 1)
 
     def load_weights(self, weights_path):
@@ -685,8 +639,6 @@ class MultiDarknet(nn.Module):
 
         # fetch the shared weight first, then individual branch
         for i, (module_def, module) in enumerate(zip( \
-               # self.shared_module_defs + sum(self.diff_module_defs_list, []), \
-               # self.module_list_shared + sum(self.module_list_diff, []))):
                  self.module_def,
                  self.module_list)):
             if module_def["type"] == "convolutional":
@@ -753,8 +705,7 @@ class MultiDarknet(nn.Module):
                 conv_layer.weight.data.cpu().numpy().tofile(fp)
         
         # Iterate through layers - individual branch next
-        num_tasks = len(self.diff_module_defs_list)
-        for j in range(num_tasks):
+        for j in range(num_branches):
             for i, (module_def, module) in enumerate(zip(self.diff_module_defs_list[j][:cutoff], self.module_list_diff[j][:cutoff])): 
                 if module_def["type"] == "convolutional":
                     conv_layer = module[0]

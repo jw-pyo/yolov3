@@ -12,7 +12,8 @@ from utils.utils import *
 
 def test(
         shared_cfg,
-        diff_cfgs,
+        diff_cfg,
+        num_branches,
         data_cfg,
         weights,
         import_model=None,
@@ -36,7 +37,7 @@ def test(
         model = import_model
     else:
         # Initialize model
-        model = MultiDarknet(shared_cfg, ast.literal_eval(diff_cfgs), img_size)
+        model = MultiDarknet(shared_cfg, diff_cfg, num_branches, img_size)
         # Load weights
         if weights.endswith('.pt'):  # pytorch format
             model.load_state_dict(torch.load(weights, map_location='cpu')['model'])
@@ -247,7 +248,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog='test.py')
     parser.add_argument('--batch-size', type=int, default=32, help='size of each image batch')
     parser.add_argument('--shared-cfg', type=str, default='cfg/multidarknet/shared.cfg', help='cfg file path')
-    parser.add_argument('--diff-cfgs', type=str, default="['cfg/multidarknet/diff1.cfg', 'cfg/multidarknet/diff2.cfg', 'cfg/multidarknet/diff3.cfg']", help='cfg file path')
+    parser.add_argument('--diff-cfg', type=str, default='cfg/multidarknet/diff1.cfg', help='cfg file path')
+    parser.add_argument('--num-branches', type=int, default=3, help='number of domain branches')
     parser.add_argument('--data-cfg', type=str, default='cfg/bdd100k/bdd100k_rainy_daytime.data', help='coco.data file path')
     parser.add_argument('--weights', type=str, default='weights/rainy/multidomain/best.pt', help='path to weights file')
     parser.add_argument('--import-model', type=str, default=None, help='True if you import model in code, not cfg files')
@@ -266,7 +268,8 @@ if __name__ == '__main__':
     with torch.no_grad():
         mAP = test(
             opt.shared_cfg,
-            opt.diff_cfgs,
+            opt.diff_cfg,
+            opt.num_branches,
             opt.data_cfg,
             opt.weights,
             opt.import_model,
