@@ -12,7 +12,7 @@ from PIL import Image
 
 from utils.parse_config import *
 from utils.utils import *
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -64,7 +64,7 @@ def parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count):
         layers = [int(x) for x in module_def["layers"].split(",")]
         #filters = sum([output_filters[i + 1 if i > 0 else i] for i in layers])
         filters = sum([output_filters[layer_i-1] for layer_i in layers]) # jwpyo: self-repaired error. it should be layer_i - 1 
-        # filters = sum([output_filters[layer_i] for layer_i in layers]) # commented by https://github.com/eriklindernoren/PyTorch-YOLOv3/issues/82
+        #filters = sum([output_filters[layer_i] for layer_i in layers]) # commented by https://github.com/eriklindernoren/PyTorch-YOLOv3/issues/82
         modules.add_module("route_%d" % i, EmptyLayer())
 
     elif module_def["type"] == "shortcut":
@@ -122,9 +122,45 @@ def create_multitask_modules(shared_module_defs, diff_module_defs_list):
             #print(j, len(output_filters))
     
     return hyperparams, module_list_shared, module_list_diff
+def create_md_modules_single_cfg(module_defs, cutoff):
+    """
+    Constructs module list of layer blocks from module configuration in module_defs
+    """
+    hyperparams = module_defs.pop(0)
+    output_filters = [int(hyperparams["channels"])]
+    module_list = nn.ModuleList()
+    branch_num = 3
+    yolo_layer_count = [0]
+    module_list = nn.ModuleList()
+
+    # shared weight
+    for i, module_def in enumerate(module_defs[:cutoff]):
+        # Register module list and number of output filters
+        modules, filters = parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count)
+        module_list.append(modules)
+        if filters is not None:
+            output_filters.append(filters)
+        #print(i, len(output_filters))
+    shared_output_filters = copy.copy(output_filters) # shallow copy
+    
+    # individual task
+    for j in range(branch_num):
+        del output_filters
+        output_filters = copy.copy(shared_output_filters)
+        for i, module_def in enumerate(module_defs[cutoff:]):
+            modules, filters = parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count)
+            module_list.append(modules)
+            if filters is not None:
+                output_filters.append(filters)
+            #print(j, len(output_filters))
+    
+    return hyperparams, module_list
 
 
-def create_modules(module_defs, diff=False):
+
+
+
+def create_modules(module_defs, last_filter=None):
     """
     Constructs module list of layer blocks from module configuration in module_defs
     if not diff:
@@ -133,7 +169,10 @@ def create_modules(module_defs, diff=False):
     """
     hyperparams = module_defs.pop(0)
     yolo_layer_count = [0]
-    output_filters = [int(hyperparams["channels"])]
+    if last_filter is None:
+        output_filters = [int(hyperparams["channels"])]
+    else:
+        output_filters = [last_filter]
     module_list = nn.ModuleList()
     for i, module_def in enumerate(module_defs):
         modules, filters = parse_module(i, module_def, hyperparams, output_filters, yolo_layer_count)
@@ -183,8 +222,10 @@ class YOLOLayer(nn.Module):
                 create_grids(self, img_size, nG)
 
                 if p.is_cuda:
-                    self.grid_xy = self.grid_xy.cuda()
-                    self.anchor_wh = self.anchor_wh.cuda()
+                    #self.grid_xy = self.grid_xy.cuda()
+                    #self.anchor_wh = self.anchor_wh.cuda() 
+                    self.grid_xy = self.grid_xy.to(p.device) #jwpyo: to use multi-GPU
+                    self.anchor_wh = self.anchor_wh.to(p.device)
 
         # p.view(bs, 255, 13, 13) -- > (bs, 3, 13, 13, 80)  # (bs, anchors, grid, grid, classes + xywh)
         p = p.view(bs, self.nA, self.nC + 5, nG, nG).permute(0, 1, 3, 4, 2).contiguous()  # prediction
@@ -208,7 +249,8 @@ class YOLOLayer(nn.Module):
 
             tcls = tcls[mask]
             if p.is_cuda:
-                txy, twh, mask, tcls = txy.cuda(), twh.cuda(), mask.cuda(), tcls.cuda()
+                #txy, twh, mask, tcls = txy.cuda(), twh.cuda(), mask.cuda(), tcls.cuda()
+                txy, twh, mask, tcls = txy.to(p.device), twh.to(p.device), mask.to(p.device), tcls.to(p.device) #jwpyo: to use multi-GPU
 
             # Compute losses
             nT = sum([len(x) for x in targets])  # number of targets
@@ -310,6 +352,13 @@ class Darknet(nn.Module):
         self.loss_names = ['loss', 'xy', 'wh', 'conf', 'cls', 'nT']
         self.losses = []
 
+    def freeze_layers(self, cutoff):
+        for i, (name, p) in enumerate(self.named_parameters()):
+            if int(name.split(".")[1]) < cutoff:
+                p.requires_grad = False
+            else:
+                p.requires_grad = True
+    
     def forward(self, x, targets=None, var=0):
         is_training = targets is not None
         output = []
@@ -419,10 +468,24 @@ class Darknet(nn.Module):
                 conv_layer.weight.data.cpu().numpy().tofile(fp)
 
         fp.close()
+    def get_n_params(self):
+        MB = 1024 * 1024
+        GB = 1024* MB
+        total_params=0
+        for i, p in enumerate(list(self.parameters())):
+            layer_params = 1
+            print("layer {}: {}".format(i,p.size()))
+            for s in p.size():
+                layer_params = layer_params * s
+            total_params += layer_params
+        print("Total number of parameters: {}".format(total_params))
+        print("Capacity of paramaeters   : {}MB = {}GB".format(total_params*4/(1*MB + 1e-7), total_params*4/(1*GB + 1e-7)))
 
 def get_yolo_layers(model):
     a = [module_def['type'] == 'yolo' for module_def in model.module_defs]
     return [i for i, x in enumerate(a) if x] #[82, 94, 106] for yolov3
+
+
 
 def create_grids(self, img_size, nG):
     self.stride = img_size / nG
@@ -516,40 +579,146 @@ class SubModule(nn.Module):
 class MultiDarknet(nn.Module):
     """YOLOv3 object detection model"""
 
-    def __init__(self, shared_config_path, diff_config_paths, img_size=416):
+    def __init__(self, shared_config_path, diff_config_paths, img_size=416, branch_num=3, hill_climbing=False, shared_len=75):
         super(MultiDarknet, self).__init__()
-        shared_module_defs = parse_model_cfg(shared_config_path) #the Module's type of python list 
-        diff_module_defs_list = [parse_model_cfg(i) for i in diff_config_paths]
-        #TODO
-        
-        self.hyperparams, \
-        module_list_shared, \
-        module_list_diff = create_multitask_modules(shared_module_defs, \
-                                                        diff_module_defs_list)
-        """
-        self.diff1_module_list = SubModule(module_list_shared)
-        self.diff2_module_list = SubModule(module_list_shared)
-        self.diff3_module_list = SubModule(module_list_shared)
-        """
-        # print(module_list_shared)
-        # module_def, module_list
-        list_of_layers = list(module_list_shared.children())
-        
-        for i in range(len(module_list_diff)):
-            list_of_layers.extend(list(module_list_diff[i].children()))
-        
-        self.module_list = nn.Sequential(*list_of_layers)
-        
-        self.module_def = shared_module_defs
-        
-        for i in range(len(diff_module_defs_list)):
-            self.module_def.extend(diff_module_defs_list[i]) # per 32
+        self.shared_config_path = shared_config_path
+        self.diff_config_paths = diff_config_paths
+        self.branch_num = branch_num
+        if not hill_climbing:
+            shared_module_defs = parse_model_cfg(shared_config_path) #the Module's type of python list 
+            diff_module_defs_list = [parse_model_cfg(i) for i in diff_config_paths]
+            self.hyperparams, \
+            module_list_shared, \
+            module_list_diff = create_multitask_modules(shared_module_defs, \
+                                                            diff_module_defs_list)
+            """
+            self.diff1_module_list = SubModule(module_list_shared)
+            self.diff2_module_list = SubModule(module_list_shared)
+            self.diff3_module_list = SubModule(module_list_shared)
+            """
+            self.shared_len = len(module_list_shared)
+            self.diff_len = len(module_list_diff[0])
+            
+            # module_def, module_list
+            list_of_layers = list(module_list_shared.children())
+            
+            for i in range(len(module_list_diff)):
+                list_of_layers.extend(list(module_list_diff[i].children()))
+            self.module_list = nn.Sequential(*list_of_layers)
+            
+            self.module_def = shared_module_defs
+            
+            for i in range(len(diff_module_defs_list)):
+                self.module_def.extend(diff_module_defs_list[i]) # per 32
+        #hillclimbing
+        else:
+            self.shared_len = shared_len
+            self.diff_len = 107 - self.shared_len
+            self.branch_num = 3
+            temp_module_defs = parse_model_cfg("cfg/multidarknet/bdd100k.cfg") # in hillclimbing mode, shared_config_path is equal to config_path
+            
+            self.hyperparams, self.module_list = create_md_modules_single_cfg(temp_module_defs, self.shared_len)
+            self.module_def = temp_module_defs[:self.shared_len]
+            for i in range(self.branch_num):
+                self.module_def.extend(temp_module_defs[self.shared_len:])
         
         self.img_size = img_size
         self.seen = 0
         self.header_info = np.array([0, 0, 0, self.seen, 0])
         self.loss_names = ['loss', 'xy', 'wh', 'conf', 'cls', 'nT']
-        #print("module_list length: {}".format(len(self.module_list)))
+    def hillClimbing(self, cutoff_layer):
+        """
+        move current model to cutoff_layer-th architecture
+        self.hyperparams
+        self.module_list
+        self.module_def
+        """
+        print("Call hillClimbing for cutoff {}".format(cutoff_layer))
+        new_model = MultiDarknet(self.shared_config_path, self.diff_config_paths, self.img_size, hill_climbing=True, shared_len=cutoff_layer) 
+        
+        #cur_param = list(self.parameters())
+        #new_param = list(new_model.parameters())
+        #dict_prev = dict(cur_param)
+        #dict_new = dict(new_param)
+        #TODO: self.named_parameters() has no running_mean, ... but we need that if we use load_state_dict()
+        dict_prev = self.state_dict()
+        dict_new = new_model.state_dict()
+
+        prev_layer_name = list(dict_prev)
+        new_layer_name = list(dict_new)
+        """
+        for name1, param1 in cur_param -> for i, name1 in enumerate(prev_layer_name) param1 = dict_prev[name1]
+        for name1, param2 in new_param -> for i, name2 in enumerate(new_layer_name) param2 = dict_new[name2]
+        """
+        tmp_shared_dict = OrderedDict()
+        tmp_diff_dict = [OrderedDict() for _ in range(self.branch_num)]
+        diff = self.shared_len - cutoff_layer
+        
+        # copy the shared weight 
+        for i in range(self.branch_num):
+            share_once = True # share shared_dict in each diff_dict once only.
+            for _, name1 in enumerate(prev_layer_name):
+                param1 = dict_prev[name1]
+                layer_num = int(name1.split(".")[1])
+                if layer_num < cutoff_layer:
+                    if i == 0:
+                        dict_new[name1].data.copy_(param1)
+                elif layer_num >= cutoff_layer and layer_num < cutoff_layer + diff:
+                    if i == 0:
+                        tmp_shared_dict[name1] = param1
+                elif layer_num == cutoff_layer + diff + i*self.diff_len:
+                    if share_once:
+                        tmp_diff_dict[i] = copy.copy(tmp_shared_dict)
+                        share_once = False
+                    tmp_diff_dict[i][name1] = param1 
+                elif layer_num > cutoff_layer + diff + i*self.diff_len and layer_num < cutoff_layer + diff + (i+1)*self.diff_len:
+                    tmp_diff_dict[i][name1] = param1
+        
+        #complete copying the each branch into tmp_diff_dict
+        # copy the diff weight
+        for i in range(self.branch_num):
+            diff_index = 0
+            for _, name2 in enumerate(new_layer_name):
+                param2 = dict_new[name2]
+                layer_num = int(name2.split(".")[1])
+                if layer_num < cutoff_layer:
+                    pass
+                elif layer_num >= cutoff_layer + i*(self.diff_len + diff) and layer_num < cutoff_layer + (i+1)*(self.diff_len + diff): 
+                    prev_param = dict_prev[list(tmp_diff_dict[i].keys())[diff_index]] 
+                    #print("current model's key: {} {}".format(list(tmp_diff_dict[i].keys())[diff_index], prev_param.size()))
+                    #print("new     model's key: {} {}".format(name2, param2.size()))
+                    dict_new[name2].data.copy_(prev_param)
+                    diff_index += 1
+                else:
+                    pass
+        #update the changed parameters to new model 
+        new_model.load_state_dict(dict_new)
+        
+        return new_model
+        
+    def freeze_layers(self, cutoff):
+        for i, (name, p) in enumerate(self.named_parameters()):
+            if int(name.split(".")[1]) < cutoff:
+                p.requires_grad = False
+            else:
+                p.requires_grad = True
+    
+    def get_n_params(self):
+        MB = 1024 * 1024
+        GB = 1024* MB
+        total_params=0
+        for i, p in enumerate(list(self.parameters())):
+            layer_params = 1
+            print("layer {}: {}".format(i,p.size()))
+            for s in p.size():
+                layer_params = layer_params * s
+            total_params += layer_params
+        print("Total number of parameters: {}".format(total_params))
+        print("Capacity of paramaeters   : {}MB = {}GB".format(total_params*4/(1*MB + 1e-7), total_params*4/(1*GB + 1e-7)))
+    def to_device(self, device):
+        for i, p in enumerate(list(self.parameters())):
+            if p.device == device:
+                p.to(device)
     def forward(self, x, targets=None, cond=0):
         """
         cond: the index of branch which to choose
@@ -570,21 +739,18 @@ class MultiDarknet(nn.Module):
         module_list = self.module_list_shared
         module_list.extend(self.module_list_diff[cond])
         """
+        # match the device type of x and weight
+        if self.module_list[0][0].weight.device == x.device:
+            pass
+        else:
+            x.to(self.module_list[0][0].weight.device)
         # for i, (module_def, module_) in enumerate(zip(module_defs, module_list)):
         # print("length of shared_module_defs: ", len(self.shared_module_defs))
         
-        #shared layer
+        #shared layer(default value of self.shared_len = 75)
         for i, (module_def, module_) in enumerate(zip( \
-                self.module_def[0:75], self.module_list[0:75])):
-            """
-            f = open("txt.txt", "a")
-            try:
-                f.write("weight: {}\n".format(module_[0].weight.shape))
-                f.close()
-            except:
-                f.write("skip print weight because it's YOLO\n")
-                f.close()
-            """
+                self.module_def[0:self.shared_len], self.module_list[0:self.shared_len])):
+            
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module_(x)
             elif module_def["type"] == "route":
@@ -619,22 +785,13 @@ class MultiDarknet(nn.Module):
         else:
             self.diff = self.diff3_module_list
         """
+        
+        #Default value of self.shared len, self.diff_len = (75, 32)
         for i, (module_def, module_) in enumerate(zip( \
-            self.module_def[75 + 32*cond : 75 + 32*(cond+1)], \
-            self.module_list[75 + 32*cond : 75 + 32*(cond+1)])): 
-            #self.diff[75:107])):
-            """
-            print("i: ", i, module_def)
-            print(x.shape)
-            f = open("txt.txt", "a")
-            try:
-                f.write("weight: {}\n".format(module_[0].weight.shape))
-                f.close()
-            except:
-                f.write("skip print weight because it's YOLO\n")
-                f.close()
-            """
-            module_ = module_.cuda()
+            self.module_def[self.shared_len + self.diff_len*cond : self.shared_len + self.diff_len*(cond+1)], \
+            self.module_list[self.shared_len + self.diff_len*cond : self.shared_len + self.diff_len*(cond+1)])): 
+            
+            #module_ = module_.cuda()
             if module_def["type"] in ["convolutional", "upsample", "maxpool"]:
                 x = module_(x)
             elif module_def["type"] == "route":
@@ -771,3 +928,6 @@ class MultiDarknet(nn.Module):
                     # Load conv weights
                     conv_layer.weight.data.cpu().numpy().tofile(fp)
         fp.close()
+if __name__ == "__main__":
+    model = MultiDarknet()
+    model.get_n_params()
